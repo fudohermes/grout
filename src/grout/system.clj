@@ -3,6 +3,7 @@
             [grout.db :as db]
             [grout.enrichment.worker :as worker]
             [grout.http.server :as http]
+            [grout.retention :as retention]
             [grout.tunabrain :as tunabrain]
             [taoensso.timbre :as log]))
 
@@ -20,7 +21,7 @@
 
 (defn ->system-config
   "Produce the Integrant system configuration map from the raw config map."
-  [{:keys [log-level server database media tunabrain enrichment]}]
+  [{:keys [log-level server database media tunabrain enrichment retention]}]
   {:grout/logger {:level (parse-log-level (or log-level :info))}
    :grout/db {:jdbc-url (:jdbc-url database)
               :username (:username database)
@@ -33,6 +34,9 @@
                                    enrichment
                                    {:db (ig/ref :grout/db)
                                     :tunabrain (ig/ref :grout/tunabrain)})
+   :grout/retention-job (merge {:enabled true :interval-ms 3600000 :cap 20 :bucket-ms 5000}
+                               retention
+                               {:db (ig/ref :grout/db)})
    :grout/http {:port (parse-port (or (:port server) 8080))
                 :db (ig/ref :grout/db)
                 :media (ig/ref :grout/media)}})
@@ -71,6 +75,12 @@
 
 (defmethod ig/halt-key! :grout/enrichment-worker [_ w]
   (worker/stop! w))
+
+(defmethod ig/init-key :grout/retention-job [_ {:keys [db] :as cfg}]
+  (retention/start! (assoc cfg :ds db)))
+
+(defmethod ig/halt-key! :grout/retention-job [_ j]
+  (retention/stop! j))
 
 (defmethod ig/init-key :grout/http [_ opts]
   (http/start! opts))

@@ -147,3 +147,18 @@
                   :set    set-map
                   :where  [:= :id id]
                   :returning [:*]})))
+
+(defn live-rows-for-retention
+  "Return the columns the retention job needs for every live row."
+  [ds]
+  (exec ds {:select [:id :channel :kind :duration_ms :created_at]
+            :from   :grout_media
+            :where  [:= :superseded_at nil]}))
+
+(defn supersede-many!
+  "Soft-delete (supersede) the given ids in one statement. No-op for empty ids."
+  [ds ids]
+  (when (seq ids)
+    (exec ds {:update :grout_media
+              :set    {:superseded_at [:now]}
+              :where  [:in :id (vec ids)]})))
