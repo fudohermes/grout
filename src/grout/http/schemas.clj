@@ -40,9 +40,13 @@
    [:source {:optional true} [:maybe :string]]
    [:source-url {:optional true} [:maybe :string]]
    [:enriched :boolean]
+   [:content-hash {:optional true} [:maybe :string]]
    [:stream-url :string]
    [:created-at {:optional true} [:maybe :string]]
    [:superseded-at {:optional true} [:maybe :string]]])
+
+(def HashPath
+  [:map [:hash :string]])
 
 (def MediaSummary
   "Compact media representation returned by the query endpoint. Includes `path`

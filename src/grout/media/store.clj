@@ -27,7 +27,7 @@
   [:cast [:array (vec xs)] [:raw "text[]"]])
 
 (def ^:private insertable-keys
-  [:kind :path :name :description :channel :tags :duration_ms
+  [:kind :path :content_hash :name :description :channel :tags :duration_ms
    :width :height :vcodec :acodec :source :source_url :enriched])
 
 (defn- exec-one [ds sqlmap]
@@ -58,6 +58,25 @@
                  :where (if include-superseded?
                           [:= :id id]
                           [:and [:= :id id] [:= :superseded_at nil]])})))
+
+(defn find-by-hash
+  "Fetch a row by content hash, including superseded rows (so intake can revive
+   a previously superseded item). Returns nil when not found."
+  [ds content-hash]
+  (exec-one ds {:select [:*]
+                :from   :grout_media
+                :where  [:= :content_hash content-hash]}))
+
+(defn update-fields!
+  "Set arbitrary columns on a row by id and return it. `:tags` (if present) is
+   coerced to text[]. Intended for intake dedup (retag/revive)."
+  [ds id fields]
+  (let [set-map (cond-> fields
+                  (contains? fields :tags) (assoc :tags (text-array (:tags fields))))]
+    (exec-one ds {:update :grout_media
+                  :set    set-map
+                  :where  [:= :id id]
+                  :returning [:*]})))
 
 (defn ->query-sqlmap
   "Build the honeysql map for a media query. Pure, so it is unit-testable

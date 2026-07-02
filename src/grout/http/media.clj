@@ -37,6 +37,7 @@
    :source (:source row)
    :source-url (:source_url row)
    :enriched (:enriched row)
+   :content-hash (:content_hash row)
    :stream-url (stream-url (:id row))
    :created-at (some-> (:created_at row) str)
    :superseded-at (some-> (:superseded_at row) str)})
@@ -77,10 +78,18 @@
 
         :else
         (try
-          {:status 201 :body (row->full (intake/intake! media body))}
+          (let [{:keys [row deduplicated]} (intake/intake! media body)]
+            {:status (if deduplicated 200 201)
+             :body (row->full row)})
           (catch clojure.lang.ExceptionInfo e
             (log/error e "Intake failed" (ex-data e))
             {:status 422 :body {:error (ex-message e)}}))))))
+
+(defn get-by-hash-handler [{:keys [ds]}]
+  (fn [{{{:keys [hash]} :path} :parameters}]
+    (if-let [row (store/find-by-hash ds hash)]
+      {:status 200 :body (row->full row)}
+      not-found)))
 
 (defn query-handler [{:keys [ds]}]
   (fn [{{q :query} :parameters}]

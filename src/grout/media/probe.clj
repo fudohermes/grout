@@ -77,6 +77,32 @@
 (defn- remux-args [in out]
   [ffmpeg-bin "-y" "-i" in "-c" "copy" "-movflags" "+faststart" out])
 
+(defn normalize-to!
+  "Normalize `in` into `out` (creating parent dirs) WITHOUT mutating `in`:
+   transcodes off-profile media or stream-copies conforming media, always with
+   faststart. Returns {:path out :probe fresh-probe :normalized bool}. Used by
+   content-addressed intake, which must leave the caller's source untouched."
+  ([in out profile] (normalize-to! in out profile nil))
+  ([in out profile probe-result]
+   (io/make-parents out)
+   (let [pr          (or probe-result (probe in))
+         conforming? (conforms? pr profile)
+         tmp         (str out ".tmp-" (System/currentTimeMillis) ".mp4")
+         args        (if conforming? (remux-args in tmp) (transcode-args in tmp profile))
+         _           (log/info "Normalizing media"
+                               {:in in :out out :conforming conforming?})
+         {:keys [exit err]} (apply sh/sh args)]
+     (when-not (zero? exit)
+       (io/delete-file tmp true)
+       (throw (ex-info "ffmpeg normalize failed"
+                       {:in in :out out :exit exit :err (last-lines err 20)})))
+     (let [tmp-f (io/file tmp)
+           out-f (io/file out)]
+       (when-not (.renameTo tmp-f out-f)
+         (io/copy tmp-f out-f)
+         (io/delete-file tmp true)))
+     {:path out :probe (probe out) :normalized (not conforming?)})))
+
 (defn normalize!
   "Ensure `path` conforms to `profile` and is faststart-enabled, rewriting the
    file to `<base>.mp4` (removing the original if the name changed). Returns

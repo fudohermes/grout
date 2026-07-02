@@ -11,7 +11,8 @@ Grout does **retrieval, not scheduling** — packing stays with the caller (PV).
 
 | Method & path | Purpose |
 |---|---|
-| `POST /grout/media` | Intake a file on the mount: probe → normalize → insert |
+| `POST /grout/media` | Intake a file on the mount: hash → probe → normalize → insert. Dedups by content hash (`201` new, `200` matched/retagged/revived) |
+| `GET /grout/by-hash/:hash` | Look up an item by SHA-256 of the source bytes (CLI pre-check) |
 | `GET /grout/media` | Query by `channel`, `tags` (AND), `min_ms`/`max_ms`, `kind`, `random`, `limit` |
 | `GET /grout/media/:id` | Fetch one |
 | `PATCH /grout/media/:id` | Mutate `name`/`description`/`tags`/`channel` |
@@ -33,6 +34,21 @@ GET /grout/media?channel=britannia&tags=daytime,fun,kids&min_ms=65000&max_ms=900
 generic (null-channel) items, which are usable on any channel (resolves
 `GROUT.md` §14). Response bodies use kebab-case keys (`duration-ms`,
 `stream-url`) per the service-wide JSON convention.
+
+### Content-addressed storage
+
+Each item carries a `content-hash` — the **SHA-256 of the original source
+bytes** (computed before normalization). Intake is idempotent: submit the same
+file again and Grout matches the existing item by hash, unions any new tags,
+fills blank metadata, and revives it if it had been superseded — returning
+`200` instead of creating a duplicate. Stored (normalized) files live at a
+content-addressed path (`<media-dir>/ab/abcd….mp4`); the caller's source file
+is never mutated.
+
+This makes tagging safe after the fact: if you upload something and forget to
+tag it, just upload again with tags. A CLI can hash the local file, `GET
+/grout/by-hash/:hash` to see whether an upload is even needed, and on a hit
+simply add tags via `PATCH`/`POST …/tags` without re-uploading.
 
 ## Configuration
 

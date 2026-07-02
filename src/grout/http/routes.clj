@@ -62,12 +62,21 @@
            :responses {200 {:body s/MediaQueryResult}}
            :handler (media/query-handler media)}
      :post {:tags ["media"]
-            :summary "Intake a file already on the mount (probe + normalize + insert)"
+            :summary "Intake a file on the mount (hash + probe + normalize + insert). Dedups by content hash: 201 when newly stored, 200 when an existing item was matched/retagged/revived."
             :parameters {:body s/IntakeRequest}
-            :responses {201 {:body s/Media}
+            :responses {200 {:body s/Media}
+                        201 {:body s/Media}
                         400 {:body s/APIError}
                         422 {:body s/APIError}}
             :handler (media/intake-handler media)}}]
+
+   ["/grout/by-hash/:hash"
+    {:get {:tags ["media"]
+           :summary "Look up an item by content hash (SHA-256 of the source bytes)"
+           :parameters {:path s/HashPath}
+           :responses {200 {:body s/Media}
+                       404 {:body s/APIError}}
+           :handler (media/get-by-hash-handler media)}}]
 
    ["/grout/media/:id"
     {:get {:tags ["media"]

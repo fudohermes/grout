@@ -34,6 +34,7 @@
    :acodec "aac"
    :source "tunarr-bumper"
    :source_url nil
+   :content_hash "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
    :enriched false
    :created_at (java.time.Instant/now)
    :superseded_at nil})
@@ -97,15 +98,25 @@
 
 ;; --- intake ----------------------------------------------------------------
 
-(deftest intake-creates-row
+(deftest intake-creates-row-201
   (let [tmp (java.io.File/createTempFile "grout" ".mp4")]
     (try
-      (with-redefs [intake/intake! (fn [_ _] sample-row)]
+      (with-redefs [intake/intake! (fn [_ _] {:row sample-row :deduplicated false})]
         (let [resp ((handler-with {:media-dir nil})
                     (json-req :post "/grout/media"
                               {:path (.getPath tmp) :kind "bumper" :tags ["fun"]}))]
           (is (= 201 (:status resp)))
           (is (= "bumper" (get-in resp [:body :kind])))))
+      (finally (.delete tmp)))))
+
+(deftest intake-dedup-returns-200
+  (let [tmp (java.io.File/createTempFile "grout" ".mp4")]
+    (try
+      (with-redefs [intake/intake! (fn [_ _] {:row sample-row :deduplicated true})]
+        (let [resp ((handler-with {:media-dir nil})
+                    (json-req :post "/grout/media"
+                              {:path (.getPath tmp) :kind "bumper" :tags ["fun"]}))]
+          (is (= 200 (:status resp)) "existing item matched by hash")))
       (finally (.delete tmp)))))
 
 (deftest intake-missing-file-is-400
@@ -122,6 +133,19 @@
                               {:path (.getPath tmp) :kind "bumper"}))]
           (is (= 422 (:status resp)))))
       (finally (.delete tmp)))))
+
+;; --- by-hash ---------------------------------------------------------------
+
+(deftest by-hash-found
+  (with-redefs [store/find-by-hash (fn [_ _] sample-row)]
+    (let [resp ((handler) (mock/request :get "/grout/by-hash/deadbeef"))]
+      (is (= 200 (:status resp)))
+      (is (= "bumper" (get-in resp [:body :kind]))))))
+
+(deftest by-hash-not-found
+  (with-redefs [store/find-by-hash (fn [_ _] nil)]
+    (let [resp ((handler) (mock/request :get "/grout/by-hash/deadbeef"))]
+      (is (= 404 (:status resp))))))
 
 ;; --- fetch one -------------------------------------------------------------
 
