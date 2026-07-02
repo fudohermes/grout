@@ -1,115 +1,126 @@
 (ns grout.http.schemas
   "Malli schemas for request/response coercion and OpenAPI generation.
 
+   These schemas drive both runtime coercion and the generated OpenAPI
+   `components/schemas`, so every entity map carries a :title/:description and
+   every field a :description (Tunarr Scheduler convention).
+
    Response bodies use kebab-case keys to match the service-wide JSON
    convention (see grout.http.middleware). Query parameters use the snake_case
    names from the GROUT.md query example (min_ms, max_ms).")
 
+(def Kind
+  [:enum {:description "Media kind discriminator."}
+   "bumper" "filler" "program"])
+
 (def APIError
-  [:map [:error :string]])
+  [:map {:title "APIError" :description "Error envelope."}
+   [:error [:string {:description "Human-readable error message."}]]])
 
 (def Health
-  [:map
-   [:status [:enum "ok" "degraded"]]
-   [:database [:enum "ok" "error"]]
-   [:version {:optional true} [:maybe :string]]])
+  [:map {:title "Health" :description "Health/readiness status."}
+   [:status [:enum {:description "Overall service status."} "ok" "degraded"]]
+   [:database [:enum {:description "Database connectivity."} "ok" "error"]]
+   [:version {:optional true} [:maybe {:description "Running build version."} :string]]])
 
 (def Version
-  [:map
-   [:git-commit {:optional true} [:maybe :string]]
-   [:git-timestamp {:optional true} [:maybe :string]]
-   [:version {:optional true} [:maybe :string]]])
+  [:map {:title "Version" :description "Build and version information."}
+   [:git-commit {:optional true} [:maybe {:description "Git commit SHA."} :string]]
+   [:git-timestamp {:optional true} [:maybe {:description "Build timestamp."} :string]]
+   [:version {:optional true} [:maybe {:description "Version tag."} :string]]])
 
 ;; --- Media -----------------------------------------------------------------
 
 (def Media
-  "Full media representation returned by GET/PATCH /grout/media/:id."
-  [:map
-   [:id :uuid]
-   [:kind :string]
-   [:path :string]
-   [:name {:optional true} [:maybe :string]]
-   [:description {:optional true} [:maybe :string]]
-   [:channel {:optional true} [:maybe :string]]
-   [:tags [:vector :string]]
-   [:duration-ms :int]
-   [:width {:optional true} [:maybe :int]]
-   [:height {:optional true} [:maybe :int]]
-   [:vcodec {:optional true} [:maybe :string]]
-   [:acodec {:optional true} [:maybe :string]]
-   [:source {:optional true} [:maybe :string]]
-   [:source-url {:optional true} [:maybe :string]]
-   [:enriched :boolean]
-   [:content-hash {:optional true} [:maybe :string]]
-   [:stream-url :string]
-   [:created-at {:optional true} [:maybe :string]]
-   [:superseded-at {:optional true} [:maybe :string]]])
-
-(def HashPath
-  [:map [:hash :string]])
+  [:map {:title "Media"
+         :description "Full media item. Returned by intake, fetch, patch, by-hash and enrich."}
+   [:id [:uuid {:description "Stable item id."}]]
+   [:kind Kind]
+   [:path [:string {:description "Absolute path on the shared mount; stream this directly when co-mounted."}]]
+   [:name {:optional true} [:maybe {:description "Human/AI title."} :string]]
+   [:description {:optional true} [:maybe {:description "Short description."} :string]]
+   [:channel {:optional true} [:maybe {:description "Owning channel, or null for generic filler usable on any channel."} :string]]
+   [:tags [:vector {:description "Freeform tags used for retrieval."} :string]]
+   [:duration-ms [:int {:description "Duration in milliseconds."}]]
+   [:width {:optional true} [:maybe {:description "Video width in pixels."} :int]]
+   [:height {:optional true} [:maybe {:description "Video height in pixels."} :int]]
+   [:vcodec {:optional true} [:maybe {:description "Video codec (e.g. h264)."} :string]]
+   [:acodec {:optional true} [:maybe {:description "Audio codec (e.g. aac)."} :string]]
+   [:source {:optional true} [:maybe {:description "Provenance (e.g. tunarr-bumper, youtube, upload)."} :string]]
+   [:source-url {:optional true} [:maybe {:description "Origin URL for orphan content."} :string]]
+   [:enriched [:boolean {:description "Whether the AI metadata pass has completed."}]]
+   [:content-hash {:optional true} [:maybe {:description "SHA-256 of the original source bytes (dedup key)."} :string]]
+   [:stream-url [:string {:description "HTTP byte-range streaming fallback path."}]]
+   [:created-at {:optional true} [:maybe {:description "Creation timestamp (ISO-8601)."} :string]]
+   [:superseded-at {:optional true} [:maybe {:description "Soft-delete timestamp, or null if live."} :string]]])
 
 (def MediaSummary
-  "Compact media representation returned by the query endpoint. Includes `path`
-   for by-path streaming and `stream-url` for the HTTP fallback."
-  [:map
-   [:id :uuid]
-   [:name {:optional true} [:maybe :string]]
-   [:duration-ms :int]
-   [:path :string]
-   [:stream-url :string]
-   [:vcodec {:optional true} [:maybe :string]]
-   [:acodec {:optional true} [:maybe :string]]
-   [:tags [:vector :string]]])
+  [:map {:title "MediaSummary"
+         :description "Compact media item returned by the query endpoint. Includes `path` for by-path streaming and `stream-url` for the HTTP fallback."}
+   [:id [:uuid {:description "Stable item id."}]]
+   [:name {:optional true} [:maybe {:description "Human/AI title."} :string]]
+   [:duration-ms [:int {:description "Duration in milliseconds."}]]
+   [:path [:string {:description "Absolute path on the shared mount."}]]
+   [:stream-url [:string {:description "HTTP byte-range streaming fallback path."}]]
+   [:vcodec {:optional true} [:maybe {:description "Video codec."} :string]]
+   [:acodec {:optional true} [:maybe {:description "Audio codec."} :string]]
+   [:tags [:vector {:description "Freeform tags."} :string]]])
 
 (def MediaQueryResult
-  [:map
-   [:count :int]
-   [:items [:vector MediaSummary]]])
+  [:map {:title "MediaQueryResult" :description "Result of a media query."}
+   [:count [:int {:description "Number of items returned."}]]
+   [:items [:vector {:description "Matching media items."} MediaSummary]]])
 
 (def MediaQueryParams
-  "Query-string parameters for GET /grout/media."
-  [:map
-   [:channel {:optional true} :string]
-   [:tags {:optional true} :string]        ; comma-separated, AND semantics
-   [:min_ms {:optional true} :int]
-   [:max_ms {:optional true} :int]
-   [:kind {:optional true} :string]
-   [:limit {:optional true} [:int {:min 1}]]
-   [:random {:optional true} :boolean]])
+  [:map {:title "MediaQueryParams" :description "Query-string parameters for GET /grout/media."}
+   [:channel {:optional true} [:string {:description "Channel; matches this channel OR generic (null-channel) items."}]]
+   [:tags {:optional true} [:string {:description "Comma-separated tags; AND semantics (all required)."}]]
+   [:min_ms {:optional true} [:int {:description "Minimum duration in ms (inclusive)."}]]
+   [:max_ms {:optional true} [:int {:description "Maximum duration in ms (inclusive)."}]]
+   [:kind {:optional true} [:string {:description "Filter by kind (bumper|filler|program)."}]]
+   [:limit {:optional true} [:int {:min 1 :description "Max items to return (default 10)."}]]
+   [:random {:optional true} [:boolean {:description "When true, return a random sample."}]]])
 
 (def IntakeRequest
-  "Body for POST /grout/media — references a file already on the mount."
-  [:map
-   [:path :string]
-   [:kind [:enum "bumper" "filler" "program"]]
-   [:channel {:optional true} [:maybe :string]]
-   [:tags {:optional true} [:vector :string]]
-   [:source {:optional true} [:maybe :string]]
-   [:source-url {:optional true} [:maybe :string]]
-   [:name {:optional true} [:maybe :string]]
-   [:description {:optional true} [:maybe :string]]])
+  [:map {:title "IntakeRequest"
+         :description "Body for POST /grout/media. References a file already on the mount; intake is idempotent by content hash."}
+   [:path [:string {:description "Absolute path to the source file on the mount."}]]
+   [:kind Kind]
+   [:channel {:optional true} [:maybe {:description "Owning channel; omit/null for generic."} :string]]
+   [:tags {:optional true} [:vector {:description "Initial tags."} :string]]
+   [:source {:optional true} [:maybe {:description "Provenance label."} :string]]
+   [:source-url {:optional true} [:maybe {:description "Origin URL for orphan content."} :string]]
+   [:name {:optional true} [:maybe {:description "Optional title."} :string]]
+   [:description {:optional true} [:maybe {:description "Optional description."} :string]]])
 
 (def MediaPatch
-  "Mutable metadata fields for PATCH /grout/media/:id."
-  [:map
-   [:name {:optional true} [:maybe :string]]
-   [:description {:optional true} [:maybe :string]]
-   [:channel {:optional true} [:maybe :string]]
-   [:tags {:optional true} [:vector :string]]])
-
-(def IdPath
-  [:map [:id :uuid]])
-
-(def DeleteQuery
-  [:map [:hard {:optional true} :boolean]])
+  [:map {:title "MediaPatch"
+         :description "Mutable metadata for PATCH /grout/media/:id. Provided fields overwrite; tags replaces the array."}
+   [:name {:optional true} [:maybe {:description "New title."} :string]]
+   [:description {:optional true} [:maybe {:description "New description."} :string]]
+   [:channel {:optional true} [:maybe {:description "New channel (null to make generic)."} :string]]
+   [:tags {:optional true} [:vector {:description "Replacement tag list."} :string]]])
 
 (def DeleteResult
-  [:map
-   [:deleted :boolean]
-   [:hard :boolean]])
+  [:map {:title "DeleteResult" :description "Outcome of a delete."}
+   [:deleted [:boolean {:description "Whether the item was deleted."}]]
+   [:hard [:boolean {:description "True for hard-delete + file unlink; false for soft-delete."}]]])
 
 (def TagList
-  [:map [:tags [:vector :string]]])
+  [:map {:title "TagList" :description "Tags for a media item."}
+   [:tags [:vector {:description "Current tags."} :string]]])
 
 (def TagAddRequest
-  [:map [:tag :string]])
+  [:map {:title "TagAddRequest" :description "Body for POST /grout/media/:id/tags."}
+   [:tag [:string {:description "Tag to add (idempotent)."}]]])
+
+;; --- Path / query parameter maps -------------------------------------------
+
+(def IdPath
+  [:map [:id [:uuid {:description "Media item id."}]]])
+
+(def HashPath
+  [:map [:hash [:string {:description "SHA-256 hex of the source bytes."}]]])
+
+(def DeleteQuery
+  [:map [:hard {:optional true} [:boolean {:description "When true, hard-delete and unlink the file."}]]])
