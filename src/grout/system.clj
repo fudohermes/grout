@@ -23,7 +23,8 @@
    :grout/db {:jdbc-url (:jdbc-url database)
               :username (:username database)
               :password (:password database)}
-   :grout/media (or media {:media-dir "/data/media/grout"})
+   :grout/media {:db (ig/ref :grout/db)
+                 :media-dir (:media-dir (or media {:media-dir "/data/media/grout"}))}
    :grout/http {:port (parse-port (or (:port server) 8080))
                 :db (ig/ref :grout/db)
                 :media (ig/ref :grout/media)
@@ -47,9 +48,9 @@
   (db/close-datasource! ds)
   (log/info "Database connection closed"))
 
-(defmethod ig/init-key :grout/media [_ opts]
-  (log/info "Media config ready" opts)
-  opts)
+(defmethod ig/init-key :grout/media [_ {:keys [db media-dir]}]
+  (log/info "Media store ready" {:media-dir media-dir})
+  {:ds db :media-dir media-dir})
 
 (defmethod ig/halt-key! :grout/media [_ _]
   nil)
