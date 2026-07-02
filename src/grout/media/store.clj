@@ -17,8 +17,11 @@
   (read-column-by-index [^Array v _ _] (vec (.getArray v))))
 
 ;; `@>` (array containment) is not a built-in honeysql operator; register it so
-;; we can express "tags contains all of" as `[:@> :tags ...]`.
-(sql/register-op! :@>)
+;; we can express "tags contains all of" as `[:@> :tags ...]`. `@` is not a
+;; valid Clojure keyword or symbol character, so the keyword is built via
+;; `(keyword ...)` and the operator is bound to a regular local name.
+(def ^:private at>-op (keyword "@>"))
+(sql/register-op! at>-op)
 
 (defn- text-array
   "honeysql fragment casting a Clojure collection to a Postgres `text[]`.
@@ -92,7 +95,7 @@
   (let [conds (cond-> []
                 (not include-superseded?) (conj [:= :superseded_at nil])
                 channel    (conj [:or [:= :channel channel] [:= :channel nil]])
-                (seq tags) (conj [:@> :tags (text-array tags)])
+                (seq tags) (conj [at>-op :tags (text-array tags)])
                 min-ms     (conj [:>= :duration_ms min-ms])
                 max-ms     (conj [:<= :duration_ms max-ms])
                 kind       (conj [:= :kind kind]))]
@@ -141,7 +144,7 @@
    nil when absent/superseded."
   [ds id tag]
   (exec-one ds {:update :grout_media
-                :set    {:tags [:case [:@> :tags (text-array [tag])] :tags
+                :set    {:tags [:case [at>-op :tags (text-array [tag])] :tags
                                  :else [:array_append :tags tag]]}
                 :where  [:and [:= :id id] [:= :superseded_at nil]]
                 :returning [:*]}))
