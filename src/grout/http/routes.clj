@@ -138,7 +138,8 @@
   [{:keys [db media] :as deps}]
   (let [router (ring/router
                 (routes deps)
-                {:data {:muuntaja mw/muuntaja
+                {:conflicts nil
+                 :data {:muuntaja mw/muuntaja
                         :coercion malli-coercion/coercion
                         :middleware [parameters/parameters-middleware
                                      muuntaja-mw/format-negotiate-middleware
