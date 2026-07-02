@@ -73,6 +73,18 @@
    [:limit {:optional true} [:int {:min 1}]]
    [:random {:optional true} :boolean]])
 
+(def IntakeRequest
+  "Body for POST /grout/media — references a file already on the mount."
+  [:map
+   [:path :string]
+   [:kind [:enum "bumper" "filler" "program"]]
+   [:channel {:optional true} [:maybe :string]]
+   [:tags {:optional true} [:vector :string]]
+   [:source {:optional true} [:maybe :string]]
+   [:source-url {:optional true} [:maybe :string]]
+   [:name {:optional true} [:maybe :string]]
+   [:description {:optional true} [:maybe :string]]])
+
 (def MediaPatch
   "Mutable metadata fields for PATCH /grout/media/:id."
   [:map

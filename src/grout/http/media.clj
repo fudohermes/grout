@@ -3,6 +3,7 @@
    component ({:ds ... :media-dir ...}) and returns a ring handler."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [grout.media.intake :as intake]
             [grout.media.store :as store]
             [taoensso.timbre :as log]))
 
@@ -52,6 +53,33 @@
 
 (def ^:private not-found
   {:status 404 :body {:error "Not found"}})
+
+(defn- under-dir?
+  "True when `path` resolves within `dir` (or `dir` is nil). Guards intake
+   against reading arbitrary files off the mount."
+  [dir path]
+  (or (nil? dir)
+      (let [d (str (.getCanonicalPath (io/file dir)) java.io.File/separator)
+            p (.getCanonicalPath (io/file path))]
+        (or (= p (.getCanonicalPath (io/file dir)))
+            (.startsWith p d)))))
+
+(defn intake-handler [{:keys [media-dir] :as media}]
+  (fn [{{body :body} :parameters}]
+    (let [path (:path body)]
+      (cond
+        (not (.exists (io/file path)))
+        {:status 400 :body {:error (str "File not found: " path)}}
+
+        (not (under-dir? media-dir path))
+        {:status 400 :body {:error "Path is outside the media directory"}}
+
+        :else
+        (try
+          {:status 201 :body (row->full (intake/intake! media body))}
+          (catch clojure.lang.ExceptionInfo e
+            (log/error e "Intake failed" (ex-data e))
+            {:status 422 :body {:error (ex-message e)}}))))))
 
 (defn query-handler [{:keys [ds]}]
   (fn [{{q :query} :parameters}]

@@ -3,6 +3,7 @@
             [cheshire.core :as json]
             [ring.mock.request :as mock]
             [grout.http.routes :as routes]
+            [grout.media.intake :as intake]
             [grout.media.store :as store]))
 
 (def ^:private fake-db
@@ -11,6 +12,9 @@
 
 (defn- handler []
   (routes/handler {:db fake-db :media {:ds fake-db :media-dir "/tmp"}}))
+
+(defn- handler-with [media]
+  (routes/handler {:db fake-db :media (merge {:ds fake-db} media)}))
 
 (def ^:private sample-id (java.util.UUID/randomUUID))
 
@@ -89,6 +93,34 @@
       (is (= 200 (:max-ms @captured)))
       (is (= "bumper" (:kind @captured)))
       (is (true? (:random @captured))))))
+
+;; --- intake ----------------------------------------------------------------
+
+(deftest intake-creates-row
+  (let [tmp (java.io.File/createTempFile "grout" ".mp4")]
+    (try
+      (with-redefs [intake/intake! (fn [_ _] sample-row)]
+        (let [resp ((handler-with {:media-dir nil})
+                    (json-req :post "/grout/media"
+                              {:path (.getPath tmp) :kind "bumper" :tags ["fun"]}))]
+          (is (= 201 (:status resp)))
+          (is (= "bumper" (get-in resp [:body :kind])))))
+      (finally (.delete tmp)))))
+
+(deftest intake-missing-file-is-400
+  (let [resp ((handler) (json-req :post "/grout/media"
+                                  {:path "/no/such/file.mp4" :kind "bumper"}))]
+    (is (= 400 (:status resp)))))
+
+(deftest intake-failure-is-422
+  (let [tmp (java.io.File/createTempFile "grout" ".mp4")]
+    (try
+      (with-redefs [intake/intake! (fn [_ _] (throw (ex-info "ffprobe failed" {})))]
+        (let [resp ((handler-with {:media-dir nil})
+                    (json-req :post "/grout/media"
+                              {:path (.getPath tmp) :kind "bumper"}))]
+          (is (= 422 (:status resp)))))
+      (finally (.delete tmp)))))
 
 ;; --- fetch one -------------------------------------------------------------
 

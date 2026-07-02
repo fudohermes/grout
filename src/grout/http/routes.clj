@@ -59,7 +59,14 @@
            :summary "Query filler media by channel, tags, duration and kind"
            :parameters {:query s/MediaQueryParams}
            :responses {200 {:body s/MediaQueryResult}}
-           :handler (media/query-handler media)}}]
+           :handler (media/query-handler media)}
+     :post {:tags ["media"]
+            :summary "Intake a file already on the mount (probe + normalize + insert)"
+            :parameters {:body s/IntakeRequest}
+            :responses {201 {:body s/Media}
+                        400 {:body s/APIError}
+                        422 {:body s/APIError}}
+            :handler (media/intake-handler media)}}]
 
    ["/grout/media/:id"
     {:get {:tags ["media"]
