@@ -1,0 +1,183 @@
+(ns grout.media.store
+  "Persistence layer for `grout_media` rows.
+
+   Pure next.jdbc + honeysql; no HTTP concerns. Column keywords are snake_case
+   to mirror the database (`:duration_ms`, `:source_url`, ...). The HTTP layer is
+   responsible for shaping these into the API's kebab-case response bodies."
+  (:require [honey.sql :as sql]
+            [next.jdbc :as jdbc]
+            [next.jdbc.result-set :as rs])
+  (:import [java.sql Array]))
+
+;; Postgres `text[]` columns come back as java.sql.Array; unwrap to a vector so
+;; callers always see a plain Clojure collection of strings.
+(extend-protocol rs/ReadableColumn
+  Array
+  (read-column-by-label [^Array v _] (vec (.getArray v)))
+  (read-column-by-index [^Array v _ _] (vec (.getArray v))))
+
+;; `@>` (array containment) is not a built-in honeysql operator; register it so
+;; we can express "tags contains all of" as `[:@> :tags ...]`.
+(sql/register-op! :@>)
+
+(defn- text-array
+  "honeysql fragment casting a Clojure collection to a Postgres `text[]`.
+   Explicit cast avoids `text[] @> varchar[]` operator-mismatch errors."
+  [xs]
+  [:cast [:array (vec xs)] [:raw "text[]"]])
+
+(def ^:private insertable-keys
+  [:kind :path :content_hash :name :description :channel :tags :duration_ms
+   :width :height :vcodec :acodec :source :source_url :enriched])
+
+(defn- exec-one [ds sqlmap]
+  (jdbc/execute-one! ds (sql/format sqlmap)
+                     {:builder-fn rs/as-unqualified-lower-maps}))
+
+(defn- exec [ds sqlmap]
+  (jdbc/execute! ds (sql/format sqlmap)
+                 {:builder-fn rs/as-unqualified-lower-maps}))
+
+(defn create!
+  "Insert a media row and return it. `m` uses snake_case column keywords;
+   `:tags` (if present) is a vector of strings."
+  [ds m]
+  (let [row (-> (select-keys m insertable-keys)
+                (assoc :tags (text-array (:tags m []))))]
+    (exec-one ds {:insert-into :grout_media
+                  :values [row]
+                  :returning [:*]})))
+
+(defn find-by-id
+  "Fetch one row by id. Excludes superseded rows unless
+   `:include-superseded?` is true. Returns nil when not found."
+  ([ds id] (find-by-id ds id {}))
+  ([ds id {:keys [include-superseded?]}]
+   (exec-one ds {:select [:*]
+                 :from :grout_media
+                 :where (if include-superseded?
+                          [:= :id id]
+                          [:and [:= :id id] [:= :superseded_at nil]])})))
+
+(defn find-by-hash
+  "Fetch a row by content hash, including superseded rows (so intake can revive
+   a previously superseded item). Returns nil when not found."
+  [ds content-hash]
+  (exec-one ds {:select [:*]
+                :from   :grout_media
+                :where  [:= :content_hash content-hash]}))
+
+(defn update-fields!
+  "Set arbitrary columns on a row by id and return it. `:tags` (if present) is
+   coerced to text[]. Intended for intake dedup (retag/revive)."
+  [ds id fields]
+  (let [set-map (cond-> fields
+                  (contains? fields :tags) (assoc :tags (text-array (:tags fields))))]
+    (exec-one ds {:update :grout_media
+                  :set    set-map
+                  :where  [:= :id id]
+                  :returning [:*]})))
+
+(defn ->query-sqlmap
+  "Build the honeysql map for a media query. Pure, so it is unit-testable
+   without a database.
+
+   Params (all optional): :channel :tags(seq) :min-ms :max-ms :kind
+   :limit(default 10) :random :include-superseded?
+
+   Channel semantics: a channel filter matches the given channel OR
+   generic (null-channel) items, which are usable on any channel."
+  [{:keys [channel tags min-ms max-ms kind limit random include-superseded?]
+    :or   {limit 10}}]
+  (let [conds (cond-> []
+                (not include-superseded?) (conj [:= :superseded_at nil])
+                channel    (conj [:or [:= :channel channel] [:= :channel nil]])
+                (seq tags) (conj [:@> :tags (text-array tags)])
+                min-ms     (conj [:>= :duration_ms min-ms])
+                max-ms     (conj [:<= :duration_ms max-ms])
+                kind       (conj [:= :kind kind]))]
+    (cond-> {:select [:*] :from :grout_media :limit limit}
+      (seq conds)  (assoc :where (into [:and] conds))
+      random       (assoc :order-by [[[:raw "random()"]]])
+      (not random) (assoc :order-by [[:created_at :desc]]))))
+
+(defn query
+  "Run a media query (see ->query-sqlmap) and return the matching rows."
+  [ds params]
+  (exec ds (->query-sqlmap params)))
+
+(defn update-metadata!
+  "Patch mutable metadata (name/description/channel/tags) on a live row.
+   Returns the updated row, or nil when the row is absent/superseded or the
+   patch has no recognised fields."
+  [ds id patch]
+  (let [set-map (cond-> (select-keys patch [:name :description :channel])
+                  (contains? patch :tags) (assoc :tags (text-array (:tags patch))))]
+    (when (seq set-map)
+      (exec-one ds {:update :grout_media
+                    :set    set-map
+                    :where  [:and [:= :id id] [:= :superseded_at nil]]
+                    :returning [:*]}))))
+
+(defn soft-delete!
+  "Set `superseded_at = now()` on a live row. Returns the row, or nil if it was
+   already absent/superseded."
+  [ds id]
+  (exec-one ds {:update :grout_media
+                :set    {:superseded_at [:now]}
+                :where  [:and [:= :id id] [:= :superseded_at nil]]
+                :returning [:*]}))
+
+(defn hard-delete!
+  "Delete a row outright (any state) and return it, so the caller can unlink the
+   backing file. Returns nil when not found."
+  [ds id]
+  (exec-one ds {:delete-from :grout_media
+                :where [:= :id id]
+                :returning [:*]}))
+
+(defn add-tag!
+  "Append `tag` to a live row's tags (idempotent). Returns the updated row, or
+   nil when absent/superseded."
+  [ds id tag]
+  (exec-one ds {:update :grout_media
+                :set    {:tags [:case [:@> :tags (text-array [tag])] :tags
+                                 :else [:array_append :tags tag]]}
+                :where  [:and [:= :id id] [:= :superseded_at nil]]
+                :returning [:*]}))
+
+(defn unenriched
+  "Return up to `limit` live rows still awaiting enrichment (enriched=false)."
+  [ds limit]
+  (exec ds {:select [:id]
+            :from   :grout_media
+            :where  [:and [:= :enriched false] [:= :superseded_at nil]]
+            :limit  limit}))
+
+(defn set-enriched!
+  "Write AI-derived metadata and flip enriched=true. Only the provided fields
+   are written; :tags (if present) replaces the column. Returns the row."
+  [ds id {:keys [name description tags]}]
+  (let [set-map (cond-> {:enriched true}
+                  (some? name)        (assoc :name name)
+                  (some? description) (assoc :description description)
+                  (some? tags)        (assoc :tags (text-array tags)))]
+    (exec-one ds {:update :grout_media
+                  :set    set-map
+                  :where  [:= :id id]
+                  :returning [:*]})))
+
+(defn live-rows-for-retention
+  "Return the columns the retention job needs for every live row."
+  [ds]
+  (exec ds {:select [:id :channel :kind :duration_ms :created_at]
+            :from   :grout_media
+            :where  [:= :superseded_at nil]}))
+
+(defn supersede-many!
+  "Soft-delete (supersede) the given ids in one statement. No-op for empty ids."
+  [ds ids]
+  (when (seq ids)
+    (exec ds {:update :grout_media
+              :set    {:superseded_at [:now]}
+              :where  [:in :id (vec ids)]})))
