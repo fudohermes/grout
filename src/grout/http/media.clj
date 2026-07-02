@@ -3,6 +3,7 @@
    component ({:ds ... :media-dir ...}) and returns a ring handler."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [grout.media.enrich :as enrich]
             [grout.media.intake :as intake]
             [grout.media.store :as store]
             [taoensso.timbre :as log]))
@@ -135,3 +136,11 @@
     (if-let [row (store/add-tag! ds id tag)]
       {:status 201 :body {:tags (vec (:tags row))}}
       not-found)))
+
+(defn enrich-handler [{:keys [ds tunabrain]}]
+  (fn [{{{:keys [id]} :path} :parameters}]
+    (if-let [row (enrich/enrich-one! ds tunabrain id)]
+      {:status 200 :body (row->full row)}
+      (if (store/find-by-id ds id {:include-superseded? true})
+        {:status 502 :body {:error "Enrichment failed or produced no metadata"}}
+        not-found))))

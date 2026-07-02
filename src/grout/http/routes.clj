@@ -92,6 +92,15 @@
                           404 {:body s/APIError}}
               :handler (media/delete-handler media)}}]
 
+   ["/grout/media/:id/enrich"
+    {:post {:tags ["media"]
+            :summary "Trigger AI metadata enrichment via Tunabrain"
+            :parameters {:path s/IdPath}
+            :responses {200 {:body s/Media}
+                        404 {:body s/APIError}
+                        502 {:body s/APIError}}
+            :handler (media/enrich-handler media)}}]
+
    ["/grout/media/:id/stream"
     {:get {:tags ["media"]
            :summary "Byte-range HTTP streaming fallback (supports Range -> 206)"

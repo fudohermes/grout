@@ -126,3 +126,24 @@
                                  :else [:array_append :tags tag]]}
                 :where  [:and [:= :id id] [:= :superseded_at nil]]
                 :returning [:*]}))
+
+(defn unenriched
+  "Return up to `limit` live rows still awaiting enrichment (enriched=false)."
+  [ds limit]
+  (exec ds {:select [:id]
+            :from   :grout_media
+            :where  [:and [:= :enriched false] [:= :superseded_at nil]]
+            :limit  limit}))
+
+(defn set-enriched!
+  "Write AI-derived metadata and flip enriched=true. Only the provided fields
+   are written; :tags (if present) replaces the column. Returns the row."
+  [ds id {:keys [name description tags]}]
+  (let [set-map (cond-> {:enriched true}
+                  (some? name)        (assoc :name name)
+                  (some? description) (assoc :description description)
+                  (some? tags)        (assoc :tags (text-array tags)))]
+    (exec-one ds {:update :grout_media
+                  :set    set-map
+                  :where  [:= :id id]
+                  :returning [:*]})))

@@ -3,6 +3,7 @@
             [cheshire.core :as json]
             [ring.mock.request :as mock]
             [grout.http.routes :as routes]
+            [grout.media.enrich :as enrich]
             [grout.media.intake :as intake]
             [grout.media.store :as store]))
 
@@ -185,3 +186,23 @@
     (let [resp ((handler) (json-req :post (str "/grout/media/" sample-id "/tags") {:tag "kids"}))]
       (is (= 201 (:status resp)))
       (is (some #{"kids"} (get-in resp [:body :tags]))))))
+
+;; --- enrich ----------------------------------------------------------------
+
+(deftest enrich-endpoint-200
+  (with-redefs [enrich/enrich-one! (fn [_ _ _] sample-row)]
+    (let [resp ((handler) (mock/request :post (str "/grout/media/" sample-id "/enrich")))]
+      (is (= 200 (:status resp)))
+      (is (= "bumper" (get-in resp [:body :kind]))))))
+
+(deftest enrich-endpoint-404-when-missing
+  (with-redefs [enrich/enrich-one! (fn [_ _ _] nil)
+                store/find-by-id (fn [_ _ & _] nil)]
+    (let [resp ((handler) (mock/request :post (str "/grout/media/" sample-id "/enrich")))]
+      (is (= 404 (:status resp))))))
+
+(deftest enrich-endpoint-502-when-enrichment-fails
+  (with-redefs [enrich/enrich-one! (fn [_ _ _] nil)
+                store/find-by-id (fn [_ _ & _] sample-row)]
+    (let [resp ((handler) (mock/request :post (str "/grout/media/" sample-id "/enrich")))]
+      (is (= 502 (:status resp))))))

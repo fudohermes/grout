@@ -1,7 +1,9 @@
 (ns grout.system
   (:require [integrant.core :as ig]
             [grout.db :as db]
+            [grout.enrichment.worker :as worker]
             [grout.http.server :as http]
+            [grout.tunabrain :as tunabrain]
             [taoensso.timbre :as log]))
 
 (defn- parse-log-level [level]
@@ -18,17 +20,22 @@
 
 (defn ->system-config
   "Produce the Integrant system configuration map from the raw config map."
-  [{:keys [log-level server database media tunabrain]}]
+  [{:keys [log-level server database media tunabrain enrichment]}]
   {:grout/logger {:level (parse-log-level (or log-level :info))}
    :grout/db {:jdbc-url (:jdbc-url database)
               :username (:username database)
               :password (:password database)}
+   :grout/tunabrain (or tunabrain {:endpoint "http://tunabrain:8080"})
    :grout/media {:db (ig/ref :grout/db)
-                 :media-dir (:media-dir (or media {:media-dir "/data/media/grout"}))}
+                 :media-dir (:media-dir (or media {:media-dir "/data/media/grout"}))
+                 :tunabrain (ig/ref :grout/tunabrain)}
+   :grout/enrichment-worker (merge {:enabled true :interval-ms 60000 :batch-size 10}
+                                   enrichment
+                                   {:db (ig/ref :grout/db)
+                                    :tunabrain (ig/ref :grout/tunabrain)})
    :grout/http {:port (parse-port (or (:port server) 8080))
                 :db (ig/ref :grout/db)
-                :media (ig/ref :grout/media)
-                :tunabrain (or tunabrain {:endpoint "http://tunabrain:8080"})}})
+                :media (ig/ref :grout/media)}})
 
 (defmethod ig/init-key :grout/logger [_ {:keys [level]}]
   (log/set-level! level)
@@ -48,12 +55,22 @@
   (db/close-datasource! ds)
   (log/info "Database connection closed"))
 
-(defmethod ig/init-key :grout/media [_ {:keys [db media-dir]}]
+(defmethod ig/init-key :grout/tunabrain [_ cfg]
+  (log/info "Tunabrain client ready" {:endpoint (:endpoint cfg)})
+  (tunabrain/client cfg))
+
+(defmethod ig/init-key :grout/media [_ {:keys [db media-dir tunabrain]}]
   (log/info "Media store ready" {:media-dir media-dir})
-  {:ds db :media-dir media-dir})
+  {:ds db :media-dir media-dir :tunabrain tunabrain})
 
 (defmethod ig/halt-key! :grout/media [_ _]
   nil)
+
+(defmethod ig/init-key :grout/enrichment-worker [_ {:keys [db] :as cfg}]
+  (worker/start! (assoc cfg :ds db)))
+
+(defmethod ig/halt-key! :grout/enrichment-worker [_ w]
+  (worker/stop! w))
 
 (defmethod ig/init-key :grout/http [_ opts]
   (http/start! opts))
