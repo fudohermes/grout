@@ -81,17 +81,9 @@
    [:limit {:optional true} [:int {:min 1 :description "Max items to return (default 10)."}]]
    [:random {:optional true} [:boolean {:description "When true, return a random sample."}]]])
 
-(def IntakeRequest
-  [:map {:title "IntakeRequest"
-         :description "Body for POST /grout/media. References a file already on the mount; intake is idempotent by content hash."}
-   [:path [:string {:description "Absolute path to the source file on the mount."}]]
-   [:kind Kind]
-   [:channel {:optional true} [:maybe {:description "Owning channel; omit/null for generic."} :string]]
-   [:tags {:optional true} [:vector {:description "Initial tags."} :string]]
-   [:source {:optional true} [:maybe {:description "Provenance label."} :string]]
-   [:source-url {:optional true} [:maybe {:description "Origin URL for orphan content."} :string]]
-   [:name {:optional true} [:maybe {:description "Optional title."} :string]]
-   [:description {:optional true} [:maybe {:description "Optional description."} :string]]])
+;; POST /grout/media is a multipart/form-data upload (see grout.http.routes),
+;; not a JSON body, so its fields aren't Malli-coerced like the others; the
+;; expected fields are documented on the route's :description instead.
 
 (def MediaPatch
   [:map {:title "MediaPatch"

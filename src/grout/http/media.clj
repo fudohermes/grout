@@ -56,34 +56,44 @@
 (def ^:private not-found
   {:status 404 :body {:error "Not found"}})
 
-(defn- under-dir?
-  "True when `path` resolves within `dir` (or `dir` is nil). Guards intake
-   against reading arbitrary files off the mount."
-  [dir path]
-  (or (nil? dir)
-      (let [d (str (.getCanonicalPath (io/file dir)) java.io.File/separator)
-            p (.getCanonicalPath (io/file path))]
-        (or (= p (.getCanonicalPath (io/file dir)))
-            (.startsWith p d)))))
+(def ^:private valid-kinds #{"bumper" "filler" "program"})
 
-(defn intake-handler [{:keys [media-dir] :as media}]
-  (fn [{{body :body} :parameters}]
-    (let [path (:path body)]
+(defn intake-handler
+  "POST /grout/media is a multipart/form-data upload — the caller need not
+   share a filesystem with the server (CLI clients, Tunarr Scheduler, etc. all
+   push bytes over HTTP). The uploaded file is spooled to a temp file by
+   ring's multipart middleware; that temp path is handed to the same
+   hash/probe/normalize/insert pipeline path-based callers used, then removed."
+  [media]
+  (fn [{:keys [multipart-params]}]
+    (let [{:strs [file kind channel tags source source-url name description]} multipart-params
+          tempfile (:tempfile file)]
       (cond
-        (not (.exists (io/file path)))
-        {:status 400 :body {:error (str "File not found: " path)}}
+        (not (map? file))
+        {:status 400 :body {:error "No file uploaded (expected multipart field `file`)"}}
 
-        (not (under-dir? media-dir path))
-        {:status 400 :body {:error "Path is outside the media directory"}}
+        (not (contains? valid-kinds kind))
+        {:status 400 :body {:error "kind is required and must be one of bumper, filler, program"}}
 
         :else
         (try
-          (let [{:keys [row deduplicated]} (intake/intake! media body)]
+          (let [req (cond-> {:path (.getAbsolutePath ^java.io.File tempfile)
+                             :kind kind
+                             :tags (vec (or (parse-tags tags) []))}
+                      (not (str/blank? channel))     (assoc :channel channel)
+                      (not (str/blank? source))      (assoc :source source)
+                      (not (str/blank? source-url))  (assoc :source-url source-url)
+                      (not (str/blank? name))        (assoc :name name)
+                      (not (str/blank? description))  (assoc :description description))
+                {:keys [row deduplicated]} (intake/intake! media req)]
             {:status (if deduplicated 200 201)
              :body (row->full row)})
           (catch clojure.lang.ExceptionInfo e
             (log/error e "Intake failed" (ex-data e))
-            {:status 422 :body {:error (ex-message e)}}))))))
+            {:status 422 :body {:error (ex-message e)}})
+          (finally
+            (when (and tempfile (.exists ^java.io.File tempfile))
+              (io/delete-file tempfile true))))))))
 
 (defn get-by-hash-handler [{:keys [ds]}]
   (fn [{{{:keys [hash]} :path} :parameters}]

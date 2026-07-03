@@ -1,19 +1,13 @@
 #!/usr/bin/env bb
 ;; grout-cli — upload/tag filler media on a Grout server.
 ;;
-;; Grout's intake endpoint (POST /grout/media) references a file already
-;; reachable on the server's own filesystem (GROUT.md: "Body references a
-;; file already on the mount"); it does not accept a multipart byte stream.
-;; This CLI is therefore meant to run somewhere that shares that mount with
-;; the Grout server (e.g. the arr-data co-mount) and simply tells the server
-;; which path to intake. If the file isn't visible to the server at the same
-;; path, intake will fail with "File not found".
-;;
-;; Before ever contacting the intake endpoint, the CLI hashes the file with
-;; the same algorithm the server uses for its content-hash dedup key
+;; No filesystem is shared with the server: this CLI hashes the file locally
+;; with the same algorithm the server uses for its content-hash dedup key
 ;; (SHA-256 of the raw bytes, matching sha256sum) and looks it up via
 ;; GET /grout/by-hash/:hash. If the file is already stored, only the tags are
-;; added (idempotent); otherwise the file is intaken with the requested tags.
+;; added (idempotent); otherwise the file's bytes are uploaded as a
+;; multipart/form-data POST to /grout/media, which hashes/probes/normalizes
+;; and stores it server-side.
 
 (require '[babashka.cli :as cli]
          '[babashka.fs :as fs]
@@ -141,14 +135,26 @@ Examples:
                              :throw false})]
     (assoc resp :json (when (seq (:body resp)) (json/parse-string (:body resp) true)))))
 
+(defn- http-post-multipart [url file-path parts verbose?]
+  (when verbose? (binding [*out* *err*] (println "POST (multipart)" url parts)))
+  (let [file-parts (map (fn [[k v]] {:name (name k) :content v}) parts)
+        resp (http/post url
+                        {:multipart (conj (vec file-parts)
+                                          {:name "file"
+                                           :content (fs/file file-path)
+                                           :filename (str (fs/file-name file-path))})
+                         :headers {"Accept" "application/json"}
+                         :throw false})]
+    (assoc resp :json (when (seq (:body resp)) (json/parse-string (:body resp) true)))))
+
 (defn- by-hash [server hash verbose?]
   (http-get (str server "/grout/by-hash/" hash) verbose?))
 
 (defn- add-tag! [server id tag verbose?]
   (http-post (str server "/grout/media/" id "/tags") {:tag tag} verbose?))
 
-(defn- intake! [server req verbose?]
-  (http-post (str server "/grout/media") req verbose?))
+(defn- upload! [server file-path parts verbose?]
+  (http-post-multipart (str server "/grout/media") file-path parts verbose?))
 
 (defn- result! [json? m]
   (if json?
@@ -164,8 +170,7 @@ Examples:
 (defn- process-file! [server opts tags file]
   (if-not (fs/exists? file)
     {:file file :error "file not found"}
-    (let [abs-path (str (fs/canonicalize file))
-          filename-tag (str "filename:" (fs/file-name file))
+    (let [filename-tag (str "filename:" (fs/file-name file))
           all-tags (vec (distinct (cond-> tags
                                      (not (:no-filename-tag opts)) (conj filename-tag))))
           hash (sha256-file file)
@@ -189,20 +194,19 @@ Examples:
         (= 404 (:status existing))
         (if (:dry-run opts)
           {:file file :action :would-upload :status 404 :tags all-tags :hash hash}
-          (let [req (cond-> {:path abs-path
-                             :kind (:kind opts)
-                             :tags all-tags
-                             :source (:source opts)}
-                      (:channel opts)     (assoc :channel (:channel opts))
-                      (:source-url opts)  (assoc :source-url (:source-url opts))
-                      (:name opts)        (assoc :name (:name opts))
-                      (:description opts) (assoc :description (:description opts)))
-                resp (intake! server req verbose?)]
+          (let [parts (cond-> {:kind (:kind opts)
+                               :tags (str/join "," all-tags)
+                               :source (:source opts)}
+                        (:channel opts)     (assoc :channel (:channel opts))
+                        (:source-url opts)  (assoc :source-url (:source-url opts))
+                        (:name opts)        (assoc :name (:name opts))
+                        (:description opts) (assoc :description (:description opts)))
+                resp (upload! server file parts verbose?)]
             (if (#{200 201} (:status resp))
               {:file file :action (if (= 201 (:status resp)) :uploaded :deduplicated)
                :id (:id (:json resp)) :status (:status resp)
                :tags (:tags (:json resp)) :hash hash}
-              {:file file :error (str "intake failed: " (or (:error (:json resp)) (:body resp)))
+              {:file file :error (str "upload failed: " (or (:error (:json resp)) (:body resp)))
                :status (:status resp)})))
 
         :else

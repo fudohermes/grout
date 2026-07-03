@@ -11,7 +11,7 @@ Grout does **retrieval, not scheduling** — packing stays with the caller (PV).
 
 | Method & path | Purpose |
 |---|---|
-| `POST /grout/media` | Intake a file on the mount: hash → probe → normalize → insert. Dedups by content hash (`201` new, `200` matched/retagged/revived) |
+| `POST /grout/media` | Upload media (`multipart/form-data`): hash → probe → normalize → insert. No shared filesystem needed between caller and server. Dedups by content hash (`201` new, `200` matched/retagged/revived) |
 | `GET /grout/by-hash/:hash` | Look up an item by SHA-256 of the source bytes (CLI pre-check) |
 | `GET /grout/media` | Query by `channel`, `tags` (AND), `min_ms`/`max_ms`, `kind`, `random`, `limit` |
 | `GET /grout/media/:id` | Fetch one |
@@ -48,7 +48,8 @@ is never mutated.
 This makes tagging safe after the fact: if you upload something and forget to
 tag it, just upload again with tags. A CLI can hash the local file, `GET
 /grout/by-hash/:hash` to see whether an upload is even needed, and on a hit
-simply add tags via `PATCH`/`POST …/tags` without re-uploading.
+simply add tags via `PATCH`/`POST …/tags` without re-uploading (see
+`grout-cli` below, which does exactly this).
 
 ## Configuration
 
@@ -73,9 +74,8 @@ on `PATH` (the nix flake provides them and sets `FFMPEG_PATH`/`FFPROBE_PATH`).
 
 A Babashka CLI for tagging/uploading filler media, built by the flake as
 `grout-cli` (`nix run .#grout-cli -- ...` or add the `grout-cli` package to
-your profile). Because intake is path-based (see above), it's meant to run
-on a host that shares the Grout media mount — it tells the server which
-local path to intake rather than streaming bytes over HTTP.
+your profile). No shared filesystem with the server is required — it works
+from any desktop or CI runner that can reach the Grout HTTP endpoint.
 
 For each file it hashes the bytes with the same SHA-256 the server uses for
 its content-hash dedup key, checks `GET /grout/by-hash/:hash`, and either
