@@ -69,6 +69,31 @@ Finer knobs (intervals, retention cap/bucket, playout profile) are set in
 Video bytes live on the mount, **never** in Postgres. `ffmpeg`/`ffprobe` must be
 on `PATH` (the nix flake provides them and sets `FFMPEG_PATH`/`FFPROBE_PATH`).
 
+## CLI (`grout-cli`)
+
+A Babashka CLI for tagging/uploading filler media, built by the flake as
+`grout-cli` (`nix run .#grout-cli -- ...` or add the `grout-cli` package to
+your profile). Because intake is path-based (see above), it's meant to run
+on a host that shares the Grout media mount — it tells the server which
+local path to intake rather than streaming bytes over HTTP.
+
+For each file it hashes the bytes with the same SHA-256 the server uses for
+its content-hash dedup key, checks `GET /grout/by-hash/:hash`, and either
+adds tags to the existing item or intakes it as new. Every file also gets a
+`filename:<basename>` tag by default, so the original name stays searchable.
+
+```sh
+grout-cli --tags=daytime,fun --tag=kids bumper1.mp4 bumper2.mp4
+GROUT_URL=http://grout:8080 grout-cli --kind=bumper --channel=britannia ident.mp4
+grout-cli --dry-run --json *.mp4   # preview without uploading/tagging
+grout-cli --help
+```
+
+Server URL comes from `-s`/`--server` or `GROUT_URL`. See `grout-cli --help`
+for the full option list (`--kind`, `--channel`, `--source`, `--source-url`,
+`--name`, `--description`, `--no-filename-tag`, `--dry-run`, `--json`,
+`--verbose`).
+
 ## Running
 
 ```sh
