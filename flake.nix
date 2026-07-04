@@ -28,6 +28,14 @@
           src = ./.;
         };
 
+        grout-cli = pkgs.writeShellApplication {
+          name = "grout-cli";
+          runtimeInputs = [ pkgs.babashka ];
+          text = ''
+            exec bb ${./bin/grout-cli.bb} "$@"
+          '';
+        };
+
         versionInfo = let
           gitCommit = self.rev or self.dirtyRev or "unknown";
           gitTimestamp = if self ? lastModified then
@@ -41,7 +49,7 @@
       in {
         packages = rec {
           default = grout;
-          inherit grout migratusRunner;
+          inherit grout migratusRunner grout-cli;
 
           deployContainer = let version = versionInfo;
           in helpers.deployContainers {
@@ -122,7 +130,7 @@
             buildInputs = [ (helpers.updateClojureDeps { aliases = [ "test" ]; }) ];
           };
           grout = pkgs.mkShell {
-            packages = with pkgs; [ clojure jdk21 ffmpeg postgresql ];
+            packages = with pkgs; [ clojure jdk21 ffmpeg postgresql babashka ];
           };
         };
 
@@ -147,6 +155,10 @@
           groutApp = {
             type = "app";
             program = "${grout}/bin/grout";
+          };
+          grout-cli = {
+            type = "app";
+            program = "${self.packages."${system}".grout-cli}/bin/grout-cli";
           };
         };
       });

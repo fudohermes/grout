@@ -7,6 +7,7 @@
             [reitit.ring.coercion :as rrc]
             [reitit.ring.middleware.parameters :as parameters]
             [reitit.ring.middleware.muuntaja :as muuntaja-mw]
+            [ring.middleware.multipart-params :refer [wrap-multipart-params]]
             [grout.db :as db]
             [grout.http.media :as media]
             [grout.http.middleware :as mw]
@@ -62,8 +63,9 @@
            :responses {200 {:body s/MediaQueryResult}}
            :handler (media/query-handler media)}
      :post {:tags ["media"]
-            :summary "Intake a file on the mount (hash + probe + normalize + insert). Dedups by content hash: 201 when newly stored, 200 when an existing item was matched/retagged/revived."
-            :parameters {:body s/IntakeRequest}
+            :summary "Upload media (multipart/form-data): hash + probe + normalize + insert. Dedups by content hash: 201 when newly stored, 200 when an existing item was matched/retagged/revived."
+            :description "multipart/form-data fields: `file` (required — the media bytes), `kind` (required: bumper|filler|program), `channel`, `tags` (comma-separated), `source`, `source-url`, `name`, `description`. No shared filesystem is required between caller and server; the upload is streamed to the server and hashed/normalized there."
+            :middleware [wrap-multipart-params]
             :responses {200 {:body s/Media}
                         201 {:body s/Media}
                         400 {:body s/APIError}

@@ -47,16 +47,18 @@
     (handler request)))
 
 (defn wrap-json-response
-  "Ensures response body is JSON encoded if it's a map or collection."
+  "Ensures response body is JSON encoded if it's a map or collection.
+   Ring requires :body to be a String, File, InputStream or ISeq of Strings —
+   a raw Clojure map is silently dropped by the Jetty adapter (empty body,
+   Content-Length: 0), so the encoded result must replace :body as a string,
+   not just be decoded back into a map."
   [handler]
   (fn [request]
     (let [response (handler request)
           body (:body response)]
       (if (or (map? body) (vector? body))
         (-> response
-            (update :body #(json/parse-string
-                            (json/generate-string % {:key-fn csk/->kebab-case-string})
-                            csk/->kebab-case-keyword))
+            (assoc :body (json/generate-string body {:key-fn csk/->kebab-case-string}))
             (assoc-in [:headers "Content-Type"] "application/json; charset=utf-8"))
         response))))
 
