@@ -108,9 +108,17 @@
     (.close client)))
 
 (defmethod ig/init-key :grout/tunarr-scheduler [_ cfg]
-  (let [client (tunarr-scheduler/create cfg)]
-    (log/info "Tunarr Scheduler client ready" {:endpoint (:endpoint cfg)})
-    client))
+  ;; If the upstream config resolves to nil (i.e. TUNARR_SCHEDULER_URL
+  ;; is unset, or resolves to an empty string), skip init and let the
+  ;; catalog fetch fall back to an empty dim-config. Integrant
+  ;; invokes init-key even for nil values in the system map (it does
+  ;; not skip them), so we have to guard here.
+  (if-not cfg
+    (do (log/info "Tunarr Scheduler disabled (no endpoint configured)")
+        nil)
+    (let [client (tunarr-scheduler/create cfg)]
+      (log/info "Tunarr Scheduler client ready" {:endpoint (:endpoint cfg)})
+      client)))
 
 (defmethod ig/halt-key! :grout/tunarr-scheduler [_ client]
   (when (and client (satisfies? java.io.Closeable client))
