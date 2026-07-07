@@ -38,7 +38,32 @@
           (is (= "bytes 2-5/10" (get-in resp [:headers "Content-Range"])))
           (is (= "4" (get-in resp [:headers "Content-Length"])))
           (is (= "video/mp4" (get-in resp [:headers "Content-Type"])))
-          (is (= "2345" (slurp (:body resp))))))
+          ;; Regression for the "written 0 < content-length" Jetty 12.1 bug:
+          ;; the body must actually carry the requested bytes (not 0 bytes,
+          ;; not the whole file). On the pre-fix `proxy [InputStream]`
+          ;; implementation, the proxy's `read` methods didn't satisfy
+          ;; Jetty's HTTP/1.1 write-back-pressure accounting, so the response
+          ;; body was effectively empty when served by Ring/jetty-adapter 1.15+.
+          (let [body-bytes (slurp (:body resp))]
+            (is (= 4 (count body-bytes)) "body must have exactly Content-Length bytes")
+            (is (= "2345" body-bytes)))))
+      (finally (.delete f)))))
+
+(deftest range-request-larger-than-bounded-buffer
+  ;; Regression for the proxy-based bounded-stream: a Range larger than
+  ;; the default Jetty 12.1 output buffer (8 KB) used to fail with
+  ;; `java.io.IOException: written 0 < content-length`. With the byte-slice
+  ;; implementation, any Range size is fine because we hand Jetty a
+  ;; `ByteArrayInputStream` over the full slice.
+  (let [content (apply str (repeat 5000 "abcdefghij"))  ; 50,000 bytes
+        f       (temp-file content)]
+    (try
+      (with-redefs [store/find-by-id (fn [_ _ & _] {:id id :path (.getPath f)})]
+        (let [resp ((handler) (-> (mock/request :get (str "/grout/media/" id "/stream"))
+                                  (mock/header "Range" "bytes=0-49999")))]
+          (is (= 206 (:status resp)))
+          (is (= "50000" (get-in resp [:headers "Content-Length"])))
+          (is (= content (slurp (:body resp))))))
       (finally (.delete f)))))
 
 (deftest full-request-returns-200

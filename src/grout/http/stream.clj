@@ -5,7 +5,8 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [grout.media.store :as store])
-  (:import [java.io File FileInputStream InputStream]))
+  (:import [java.io ByteArrayInputStream File FileInputStream InputStream]
+           [java.nio.channels FileChannel]))
 
 (def ^:private content-types
   {"mp4" "video/mp4" "m4v" "video/mp4" "webm" "video/webm"
@@ -32,27 +33,40 @@
         (nil? e)                [s (dec len)]                        ; open-ended
         :else                   [s (min e (dec len))]))))
 
-(defn- bounded-stream
-  "Wrap `in` so it yields at most `limit` bytes, then reports EOF."
-  ^InputStream [^InputStream in ^long limit]
-  (let [remaining (atom limit)]
-    (proxy [InputStream] []
-      (read
-        ([]
-         (if (pos? ^long @remaining)
-           (let [b (.read in)]
-             (when (>= b 0) (swap! remaining dec))
-             b)
-           -1))
-        ([buf off l]
-         (let [rem (long @remaining)]
-           (if (pos? rem)
-             (let [n (.read in buf off (int (min (long l) rem)))]
-               (when (pos? n) (swap! remaining - n))
-               n)
-             -1))))
-      (available [] (int (min (long (.available in)) (long @remaining))))
-      (close [] (.close in)))))
+(defn- range-bytes
+  "Read `length` bytes from `f` starting at byte `start` (0-based, inclusive)
+  and return them as a `ByteArrayInputStream`.
+
+  Loading the slice into memory is intentional: Jetty 12.1's `HttpOutput`
+  requires the response body's `InputStream` to behave consistently with its
+  HTTP/1.1 write-back-pressure accounting. The previous `proxy [InputStream]`
+  implementation (`bounded-stream`, removed) made Jetty's write loop see
+  `written 0 < content-length` and fail with HTTP 500, because the proxy's
+  custom `read` methods didn't satisfy Jetty's expectation that the
+  underlying stream drain in well-defined chunks. `ByteArrayInputStream`
+  is JDK-blessed and has the exact semantics Jetty expects.
+
+  For a typical video Range request the slice is 1-10 MB (HTTP video
+  seekers use small ranges; long sequential reads should not be served
+  via HTTP at all — use the by-path fast path on the shared mount, which
+  is the documented primary path per GROUT.md §7). The memory cost is
+  bounded by the request's own `Content-Length`."
+  ^InputStream [^File f ^long start ^long length]
+  (let [buf (byte-array length)
+        ^FileInputStream in (FileInputStream. f)]
+    (try
+      (let [^FileChannel ch (.getChannel in)]
+        (.position ch (long start))
+        (let [offset (atom 0)]
+          (while (< @offset length)
+            (let [n (.read in buf (int @offset) (int (- length @offset)))]
+              (when (neg? n)
+                (throw (java.io.EOFException.
+                         (str "unexpected EOF at " (+ @offset n)
+                              " of " length " bytes from " (.getPath f)))))
+              (swap! offset + n)))))
+      (finally (.close in)))
+    (ByteArrayInputStream. buf)))
 
 (defn stream-handler [{:keys [ds]}]
   (fn [{{{:keys [id]} :path} :parameters :as req}]
@@ -79,13 +93,11 @@
 
               :else
               (let [[start end] rng
-                    length (inc (- end start))
-                    in (FileInputStream. f)]
-                (.position (.getChannel in) (long start))
+                    length (inc (- end start))]
                 {:status 206
                  :headers {"Content-Type" ct
                            "Content-Length" (str length)
                            "Accept-Ranges" "bytes"
                            "Content-Range" (str "bytes " start "-" end "/" len)}
-                 :body (bounded-stream in length)})))))
+                 :body (range-bytes f (long start) (long length))})))))
       {:status 404 :body {:error "Not found"}})))
