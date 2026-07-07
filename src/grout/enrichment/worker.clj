@@ -8,13 +8,18 @@
   (:import [java.util.concurrent Executors TimeUnit]))
 
 (defn run-once!
-  "Enrich up to `batch-size` pending rows. Returns the number attempted."
+  "Enrich up to `batch-size` pending rows. Returns the number attempted.
+
+  The `tunabrain` arg is the *enrichment orchestrator* map (see system
+  config): it carries both the `TunabrainClient` and the `dim-config`
+  (the dimensions catalog passed to `/categorize`). Callers wire this
+  map via `:grout/media` in the Integrant system."
   [ds tunabrain batch-size]
   (let [rows (store/unenriched ds batch-size)]
     (when (seq rows)
       (log/info "Enrichment sweep" {:pending (count rows)})
       (doseq [{:keys [id]} rows]
-        (try (enrich/enrich-one! ds tunabrain id)
+        (try (enrich/enrich-one! ds (:tunabrain tunabrain) (:dim-config tunabrain) id)
              (catch Exception e
                (log/warn e "Enrichment failed for row" {:id id})))))
     (count rows)))

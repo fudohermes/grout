@@ -150,14 +150,56 @@ For each incoming file (already on the arr-data mount):
 ## 9. AI enrichment (via Tunabrain)
 
 - A worker (or a `POST /grout/media/:id/enrich` endpoint) picks up
-  `enriched=false` rows and calls **Tunabrain** to derive tags, a name, and a
-  short description from the media (and any provided hint/context).
+  `enriched=false` rows and calls **Tunabrain** to derive tags + structured
+  dimensions from the media (and any provided hint/context).
 - Writes results back and sets `enriched=true`.
 - Grout stays dumb about models; Tunabrain owns the OpenRouter key and prompt.
   Follow TS's existing Tunabrain-client pattern.
-  
-- Suggestion: use OpenAI-compatible STT service to transcribe videos (at least
-  partially) to fascilitate better tagging & metadata generation.
+
+- **Two forms of media, two enrichment paths (both go through the same
+  typed Tunabrain endpoints — `/categorize` + `/tags`):**
+  - **Short form** (filler/bumper/ad, <10min): Tunabrain returns
+    `audience` and `channel` dimensions (the two dimensions Grout
+    queries for) plus free-form tags.
+  - **Long form** (documentaries, essays, YouTube series, etc.):
+    same endpoints, plus the `MediaContext` (Wikipedia / YouTube
+    channel / STT excerpt) that the model grounded on. Grout persists
+    the `MediaContext` to `enrichment_context` and replays it on
+    retry so a human-corrected `summary` flows back to the model
+    (per the `MediaContext` design).
+
+- **Dimension catalog source of truth is Tunarr Scheduler.** Grout
+  fetches `GET /api/dimensions` + `GET /api/dimensions/{name}/values`
+  at startup and passes the result to Tunabrain's `/categorize` as
+  the `categories` map. Tunarr Scheduler does not expose per-dimension
+  descriptions; Grout ships those in its own config
+  (`resources/config.edn` `:dimension-descriptions`).
+
+- **Tunabrain has no generic chat-completions endpoint.** Per design
+  decision (2026-07-07), Grout does NOT use the OpenAI
+  `/v1/chat/completions` shape. All Grout → Tunabrain traffic is
+  typed-purposeful endpoints. See the design doc at
+  `/opt/data/home/docs/grout-tunabrain-enrichment-requirements.md`.
+
+- **AI does not set name or description.** Both stay human-only.
+  The AI's job is classification (what is it, which dimensions, which
+  channel), not naming.
+
+- **v2: long-form orchestrated endpoint** (deferred). A single
+  Tunabrain endpoint `POST /enrich/long-form` that orchestrates
+  STT + YouTube scraping + categorize + tags as one call and
+  returns the merged result, with the `context` stored for replay.
+  This is the v2 path for long-form enrichment quality; the current
+  two-call `/categorize` + `/tags` flow already works for both
+  forms but is noisier on long-form because no STT or YouTube
+  grounding is performed.
+
+- **Grout → Tunarr Scheduler dimensions fetch** lives in
+  `grout.tunarr-scheduler.clj`; the HTTP client mirrors
+  `tunarr.scheduler.tunabrain.clj` style. Single retry-with-backoff
+  at startup; failure logs a warning and the enrichment orchestrator
+  starts with an empty dim-config (free-form `/tags` still works,
+  structured `/categorize` is skipped).
 
 ## 10. Lifecycle / retention
 

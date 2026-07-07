@@ -4,10 +4,12 @@
    Pure next.jdbc + honeysql; no HTTP concerns. Column keywords are snake_case
    to mirror the database (`:duration_ms`, `:source_url`, ...). The HTTP layer is
    responsible for shaping these into the API's kebab-case response bodies."
-  (:require [honey.sql :as sql]
+  (:require [cheshire.core :as json]
+            [honey.sql :as sql]
             [next.jdbc :as jdbc]
             [next.jdbc.result-set :as rs])
-  (:import [java.sql Array]))
+  (:import [java.sql Array]
+           [org.postgresql.util PGobject]))
 
 ;; Postgres `text[]` columns come back as java.sql.Array; unwrap to a vector so
 ;; callers always see a plain Clojure collection of strings.
@@ -15,6 +17,35 @@
   Array
   (read-column-by-label [^Array v _] (vec (.getArray v)))
   (read-column-by-index [^Array v _ _] (vec (.getArray v))))
+
+(defn- as-jsonb
+  "Wrap a JSON-serialised string in a `PGobject` typed as `jsonb` so the
+  Postgres driver writes it as JSONB (with `::jsonb` cast) instead of
+  trying to escape it as a string literal. Required because plain
+  text-typed parameters get `error: column ... is of type jsonb`."
+  [^String s]
+  (doto (PGobject.)
+    (.setType "jsonb")
+    (.setValue s)))
+
+;; JSONB columns come back as either a `PGobject` (most JDBC drivers) or a raw
+;; String (some configurations). Read both as parsed Clojure data so the
+;; orchestrator can compare, log, and re-send the `MediaContext` without
+;; caring about the driver representation.
+(extend-protocol rs/ReadableColumn
+  PGobject
+  (read-column-by-label [v _]
+    (let [t (.getType v)]
+      (if (= "jsonb" t)
+        (try (json/parse-string (.getValue v) true)
+             (catch Exception _ (.getValue v)))
+        (.getValue v))))
+  (read-column-by-index [v _ _]
+    (let [t (.getType v)]
+      (if (= "jsonb" t)
+        (try (json/parse-string (.getValue v) true)
+             (catch Exception _ (.getValue v)))
+        (.getValue v)))))
 
 ;; `@>` (array containment) is not a built-in honeysql operator; register it so
 ;; we can express "tags contains all of" as `[:@> :tags ...]`. `@` is not a
@@ -158,13 +189,37 @@
             :limit  limit}))
 
 (defn set-enriched!
-  "Write AI-derived metadata and flip enriched=true. Only the provided fields
-   are written; :tags (if present) replaces the column. Returns the row."
-  [ds id {:keys [name description tags]}]
+  "Mark a row as enriched and persist the AI-derived metadata + the
+  `MediaContext` Tunabrain returned (so we can replay it on a future
+  enrichment attempt if a human corrects the grounding).
+
+  Writeable fields:
+    * `:name`                  — human-set only; AI does NOT set this
+    * `:description`           — human-set only; AI does NOT set this
+    * `:tags`                  — replaces the column; union is the
+                                 caller's responsibility (see
+                                 `media.enrich/merge-enrichment`)
+    * `:enrichment-context`    — the `MediaContext` Tunabrain returned;
+                                 stored as JSONB and replayed on retry
+    * `:enrichment-grounding-source` — the `context.source` value
+                                 (provided-text / provided-summary /
+                                 provided-link / wikipedia / none);
+                                 diagnostic for \"did the auto-search
+                                 land right?\" — diagnostic only
+
+  Returns the row, or nil if the row is missing."
+  [ds id {:keys [name description tags enrichment-context
+                 enrichment-grounding-source]}]
   (let [set-map (cond-> {:enriched true}
-                  (some? name)        (assoc :name name)
-                  (some? description) (assoc :description description)
-                  (some? tags)        (assoc :tags (text-array tags)))]
+                  (some? name)                     (assoc :name name)
+                  (some? description)              (assoc :description description)
+                  (some? tags)                     (assoc :tags (text-array tags))
+                  (some? enrichment-context)       (assoc :enrichment_context
+                                                       (as-jsonb
+                                                         (json/generate-string
+                                                           enrichment-context)))
+                  (some? enrichment-grounding-source) (assoc :enrichment_grounding_source
+                                                            enrichment-grounding-source))]
     (exec-one ds {:update :grout_media
                   :set    set-map
                   :where  [:= :id id]
