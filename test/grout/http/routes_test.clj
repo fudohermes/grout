@@ -300,19 +300,19 @@
 ;; --- enrich ----------------------------------------------------------------
 
 (deftest enrich-endpoint-200
-  (with-redefs [enrich/enrich-one! (fn [_ _ _] sample-row)]
+  (with-redefs [enrich/enrich-one! (fn [_ _ _ _] sample-row)]
     (let [resp (call (handler) (mock/request :post (str "/grout/media/" sample-id "/enrich")))]
       (is (= 200 (:status resp)))
       (is (= "bumper" (get-in resp [:body :kind]))))))
 
 (deftest enrich-endpoint-404-when-missing
-  (with-redefs [enrich/enrich-one! (fn [_ _ _] nil)
+  (with-redefs [enrich/enrich-one! (fn [_ _ _ _] nil)
                 store/find-by-id (fn [_ _ & _] nil)]
     (let [resp (call (handler) (mock/request :post (str "/grout/media/" sample-id "/enrich")))]
       (is (= 404 (:status resp))))))
 
 (deftest enrich-endpoint-502-when-enrichment-fails
-  (with-redefs [enrich/enrich-one! (fn [_ _ _] nil)
+  (with-redefs [enrich/enrich-one! (fn [_ _ _ _] nil)
                 store/find-by-id (fn [_ _ & _] sample-row)]
     (let [resp (call (handler) (mock/request :post (str "/grout/media/" sample-id "/enrich")))]
       (is (= 502 (:status resp))))))

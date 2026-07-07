@@ -17,9 +17,32 @@
                    :channels 2
                    :audio-bitrate "192k"}}
 
+ ;; Tunabrain: typed, purposeful endpoints (see
+ ;; /opt/data/home/docs/grout-tunabrain-enrichment-requirements.md).
+ ;; Grout calls /categorize + /tags — NOT the OpenAI chat-completions
+ ;; shape. No :chat-path key.
  :tunabrain {:endpoint #or [#env TUNABRAIN_URL "http://tunabrain:8080"]
              :model #or [#env GROUT_TUNABRAIN_MODEL "openrouter/auto"]
              :timeout-ms 30000}
+
+ ;; Tunarr Scheduler: source of the dimensions catalog. At startup we
+ ;; fetch GET /api/dimensions + GET /api/dimensions/{name}/values from
+ ;; this service and pass the result to Tunabrain's /categorize call.
+ ;; If TUNARR_SCHEDULER_URL is unset, the enrichment orchestrator
+ ;; starts with an empty catalog (log a warning; enrichment still
+ ;; works for the free-form-tags path).
+ :tunarr-scheduler {:endpoint #or [#env TUNARR_SCHEDULER_URL ""]}
+
+ ;; Natural-language descriptions for each dimension, fed to
+ ;; Tunabrain's /categorize `CategoryDefinition`. Tunarr Scheduler
+ ;; does not expose descriptions; we ship them in the Grout config.
+ ;; Keep these in sync with tunarr-scheduler/src/.../config.edn when
+ ;; a new dimension is added.
+ :dimension-descriptions {:audience "Audience segments this media is appropriate for (kids, teen, family, adult)"
+                         :channel  "Tunarr Scheduler channels this media can play on (e.g. britannia, goldenreels, toontown)"
+                         :freshness "How recent this media is (e.g. fresh, current, classic, archival)"
+                         :season    "Seasonal slot this media fits (e.g. summer, holiday, evergreen)"
+                         :time-slot "Broadcast time-slot this media fits (e.g. morning, prime-time, late-night)"}
 
  ;; Async metadata enrichment sweep (GROUT.md §9).
  :enrichment {:enabled #or [#env GROUT_ENRICHMENT_ENABLED true]
