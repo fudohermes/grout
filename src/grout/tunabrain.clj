@@ -33,10 +33,14 @@
             [taoensso.timbre :as log]))
 
 (def ^:private default-timeout-ms
-  "Default socket timeout for Tunabrain calls. Categorization may invoke
-  a heavier LLM call than tagging, so we keep the default modest; callers
-  can override per-request."
-  30000)
+  "Default socket timeout for Tunabrain calls. The composite
+  `/enrich/short-form` endpoint orchestrates describe + categorize + tags
+  internally, so a single call can take 20-50s on slow LLM providers.
+  We default to 90s so a slow call still succeeds; callers can override
+  per-request via `:timeout-ms` in `request-enrich-short-form!`'s opts.
+  Real outages still fail fast (90s socket timeout) — this is the
+  upper bound on a single call, not the round-trip SLA."
+  90000)
 
 (defrecord TunabrainClient [endpoint http-opts]
   java.io.Closeable
@@ -107,16 +111,48 @@
 ;; config; `channel` values come from Tunarr Scheduler's `/api/dimensions`).
 ;; ---------------------------------------------------------------------------
 
+(defn- derive-title
+  "Pick the best available working title for a Grout row, in priority order:
+
+    1. `:name` (the human/AI-set title; may be nil on first enrichment)
+    2. the first `<filename>` tag (the original source filename, preserved
+       on every row at intake time)
+    3. the basename of `:path` (the on-disk content-addressed path; not
+       the source filename, but better than nothing)
+    4. the literal string `\"<unnamed>\"`
+
+  This fallback chain exists because the `/enrich/short-form` describe
+  step (PR #48 in Tunabrain) calls a Wikipedia auto-search when the
+  caller doesn't supply a `MediaContext`. If we send the literal
+  `\"<unnamed>\"` placeholder, the auto-search latches onto whatever
+  ambiguous term it can find — we observed it latching onto a
+  disambiguation page and producing confident-but-wrong titles like
+  \"Unnamed Memory\" for items that are actually animation tutorials.
+  The describe chain's system prompt is correct (\"do NOT invent facts\");
+  the only fix is to give it a working title that has some signal."
+  [{:keys [name tags path]}]
+  (or (and name (not (str/blank? name)) name)
+      (some (fn [t]
+              (when (str/starts-with? t "filename:")
+                (str/replace t #"^filename:" "")))
+            tags)
+      (when path
+        (let [basename (last (str/split path #"/"))]
+          (when-not (str/blank? basename)
+            basename)))
+      "<unnamed>"))
+
 (defn- media->tunabrain
-  "Build a Tunabrain `MediaItem` from a Grout row map. We only have the
-  bare minimum: an internal UUID (no external meaning) and a derived
-  filename. Tunabrain's Wikipedia auto-search will not find anything for
-  a derived filename, so we MUST pass a `MediaContext` to ground the
-  model — see `request-categorization!` and `request-tags!` for the
-  call sites."
-  [{:keys [id name]}]
+  "Build a Tunabrain `MediaItem` from a Grout row map. The title is
+  derived from the row's `:name` (preferred) or the original source
+  filename captured in the `filename:` tag at intake (fallback). Without
+  this fallback, the LLM-grounded describe step has nothing to work from
+  and the Wikipedia auto-search latches onto garbage. The `MediaContext`
+  is the caller-supplied grounding; see `request-enrich-short-form!` for
+  the call site."
+  [{:keys [id] :as row}]
   {:id (str id)
-   :title (or name "<unnamed>")})
+   :title (derive-title row)})
 
 (defn- category-def
   "Format a single dimension's allowed values as a Tunabrain
