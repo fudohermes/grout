@@ -144,6 +144,78 @@
             {:audience {:description "A" :values ["kids"]}}
             [])))))
 
+;; --- title-derivation fallback chain ----------------------------------------
+;;
+;; Grout's `media->tunabrain` picks a working title for the describe
+;; step in priority order: row `:name` > first `<filename>` tag > path
+;; basename > "<unnamed>". Without the filename fallback, rows with no
+;; human-set name get "<unnamed>" sent to Tunabrain, and the Wikipedia
+;; auto-search latches onto a disambiguation page (e.g. "Unnamed Memory"
+;; for items that are actually animation tutorials). These tests pin
+;; each branch of the chain.
+
+(defn- capture-request-title
+  "Call `request-enrich-short-form!` with the given row, return the
+  `:title` field of the request body that was sent to Tunabrain."
+  [row]
+  (with-mock (mock-post {:status 200
+                         :body (json/generate-string
+                                 {:media    {:id "m1" :title "echo"}
+                                  :dimensions []
+                                  :tags    []
+                                  :context nil
+                                  :cost_estimate {:estimated_cost_usd 0
+                                                  :llm_calls_used 1
+                                                  :estimated_tokens "~1"}
+                                  :warnings []})})
+    (tb/request-enrich-short-form!
+      cl row
+      {:audience {:description "A" :values ["kids"]}}
+      (:tags row))
+    (get-in (body-as-map) [:media :title])))
+
+(deftest enrich-short-form-prefers-row-name-when-set
+  (is (= "Human Title"
+         (capture-request-title
+           {:id (java.util.UUID/randomUUID)
+            :name "Human Title"
+            :tags ["filename:original-source.mp4"]}))
+      "row :name takes precedence over the filename tag"))
+
+(deftest enrich-short-form-falls-back-to-filename-tag-when-name-is-nil
+  (is (= "2025-09-28 2025-09-28 Animation School— Keeping motivated— (2025) (2025).mp4"
+         (capture-request-title
+           {:id (java.util.UUID/randomUUID)
+            :name nil
+            :tags ["animation" "animation-short" "test-batch"
+                   "filename:2025-09-28 2025-09-28 Animation School— Keeping motivated— (2025) (2025).mp4"]}))
+      "filename tag is the source-of-truth fallback when the row has no :name"))
+
+(deftest enrich-short-form-falls-back-to-filename-tag-when-name-is-blank
+  (is (= "real-file.mp4"
+         (capture-request-title
+           {:id (java.util.UUID/randomUUID)
+            :name "   "
+            :tags ["filename:real-file.mp4"]}))
+      "blank/whitespace :name is treated as missing — falls through to the filename tag"))
+
+(deftest enrich-short-form-falls-back-to-path-basename-when-no-filename-tag
+  (is (= "abc123.mp4"
+         (capture-request-title
+           {:id (java.util.UUID/randomUUID)
+            :name nil
+            :tags ["animation" "test-batch"]
+            :path "/data/media/grout/aa/abc123.mp4"}))
+      "path basename is the last-resort source of a working title before <unnamed>"))
+
+(deftest enrich-short-form-falls-back-to-unnamed-when-nothing-else-available
+  (is (= "<unnamed>"
+         (capture-request-title
+           {:id (java.util.UUID/randomUUID)
+            :name nil
+            :tags []}))
+      "literal <unnamed> is the last-resort fallback (preserved from the pre-fix behavior — the fix is to use it only when nothing else is available, not as the primary case for normal rows)"))
+
 ;; --- helpers ----------------------------------------------------------------
 
 (deftest dimension-selections->tag-prefix
