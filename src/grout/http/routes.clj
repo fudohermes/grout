@@ -133,6 +133,13 @@
                         404 {:body s/APIError}}
             :handler (dirprof/enrich-by-tag-handler media)}}]
 
+   ["/grout/directory-profiles"
+    {:get {:tags ["directory-profiles"]
+           :summary "List all directory/tag-group profiles (the collection catalog)"
+           :description "One entry per parent-directory tag group, each with its live item count and enrichment status. Backs a 'Collections' browse view over Grout media."
+           :responses {200 {:body s/DirectoryProfileList}}
+           :handler (dirprof/list-profiles-handler media)}}]
+
    ["/grout/directory-profiles/:tag"
     {:get {:tags ["directory-profiles"]
            :summary "Read a directory/tag-group profile"

@@ -95,6 +95,33 @@
     (is (= 404 (:status ((dirprof/get-profile-handler deps)
                          {:parameters {:path {:tag "nope"}}}))))))
 
+(deftest list-profiles-returns-catalog-with-live-counts
+  (with-redefs [dp/list-profiles (fn [_]
+                                   [{:status "ready" :tag_value "parent-directory:a"
+                                     :concept_name "Aaa" :item_count_at_enrichment 3
+                                     :dimensions {:channel ["muse"]} :tags ["x"]}
+                                    {:status "pending" :tag_value "parent-directory:b"
+                                     :concept_name "Bbb" :item_count_at_enrichment 0
+                                     :dimensions nil :tags nil}])
+                store/count-by-tag (fn [_ tag]
+                                     (case tag
+                                       "parent-directory:a" 5
+                                       "parent-directory:b" 2))]
+    (let [resp ((dirprof/list-profiles-handler deps) {})
+          profiles (get-in resp [:body :profiles])]
+      (is (= 200 (:status resp)))
+      (is (= 2 (count profiles)))
+      (is (= ["parent-directory:a" "parent-directory:b"] (map :tag profiles)))
+      (is (= [5 2] (map :item-count profiles))
+          "item-count is the live count, not item_count_at_enrichment")
+      (is (= "Aaa" (:concept-name (first profiles)))))))
+
+(deftest list-profiles-empty-catalog
+  (with-redefs [dp/list-profiles (fn [_] [])]
+    (let [resp ((dirprof/list-profiles-handler deps) {})]
+      (is (= 200 (:status resp)))
+      (is (= [] (get-in resp [:body :profiles]))))))
+
 ;; Regression: a profile row read from the DB has dimensions with string keys
 ;; (Cheshire parses jsonb objects into Clojure maps with string keys), but the
 ;; OpenAPI response schema declares [:map-of :keyword [:vector :string]]. If
