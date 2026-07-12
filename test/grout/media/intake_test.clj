@@ -26,6 +26,30 @@
           (is (= "britannia" (:channel fields)) "blank channel filled")
           (is (nil? (:superseded_at fields)) "revived"))))))
 
+(deftest derive-kind-splits-on-15-minutes
+  ;; Bumpers preserved; everything else filler under 15 min, program at/over it.
+  (is (= "bumper"  (intake/derive-kind "bumper"  3000)))
+  (is (= "bumper"  (intake/derive-kind "bumper"  (* 60 60 1000))) "explicit bumper wins even if long")
+  (is (= "filler"  (intake/derive-kind "filler"  60000)))
+  (is (= "filler"  (intake/derive-kind "program" 60000)) "duration overrides an over-eager caller kind")
+  (is (= "filler"  (intake/derive-kind "filler"  (dec intake/long-form-threshold-ms))))
+  (is (= "program" (intake/derive-kind "filler"  intake/long-form-threshold-ms)) "exactly 15 min is content")
+  (is (= "program" (intake/derive-kind "filler"  (* 44 60 1000))) "a 44-min episode is content, not filler")
+  (is (= "filler"  (intake/derive-kind "filler"  nil)) "unknown duration defaults to filler"))
+
+(deftest new-item-derives-kind-from-duration
+  (let [created (atom nil)]
+    (with-redefs [hash/sha256-file    (fn [_] "abcd")
+                  store/find-by-hash  (fn [_ _] nil)
+                  probe/normalize-to! (fn [_ out _] {:path out
+                                                     :probe {:duration-ms (* 44 60 1000)}
+                                                     :normalized false})
+                  store/create!       (fn [_ row] (reset! created row) (assoc row :id 1))]
+      ;; A 44-min upload that the CLI defaulted to filler is stored as program.
+      (intake/intake! {:ds nil :media-dir "/m"}
+                      {:path "/src/taskmaster.mkv" :kind "filler"})
+      (is (= "program" (:kind @created))))))
+
 (deftest new-item-normalizes-and-inserts
   (let [created (atom nil)]
     (with-redefs [hash/sha256-file     (fn [_] "abcd")

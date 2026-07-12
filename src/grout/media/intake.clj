@@ -11,6 +11,26 @@
             [grout.media.store :as store]
             [taoensso.timbre :as log]))
 
+;; Grout owns the filler/content boundary, not the caller. grout-cli defaults
+;; kind to "filler" and bulk uploads pass one kind for a whole directory, so the
+;; caller-supplied kind is unreliable (e.g. 44-min episodes arriving as filler).
+;; The probed duration is authoritative: >= 15 min is long-form `program`
+;; ("content"), under 15 min is `filler`. Bumpers are the exception — a
+;; short-form special case of filler (idents/interstitials, always well under
+;; the threshold, only ever used to fill gaps), kept distinct so retention
+;; buckets by (channel, kind, duration) still see them.
+(def long-form-threshold-ms (* 15 60 1000))
+
+(defn derive-kind
+  "The stored kind for a new item, from the caller's `kind` and the probed
+   `duration-ms`. Explicit bumpers are preserved; everything else is `program`
+   at/over the 15-minute threshold and `filler` under it."
+  [caller-kind duration-ms]
+  (cond
+    (= caller-kind "bumper")                                   "bumper"
+    (and duration-ms (>= duration-ms long-form-threshold-ms))  "program"
+    :else                                                      "filler"))
+
 (defn- unique-violation?
   "True when `e` — or any cause in its chain — is a Postgres unique-constraint
    violation (SQLSTATE 23505). Intake's content_hash check-then-insert is not
@@ -57,7 +77,7 @@
           (log/info "Intake stored new item"
                     {:path final-path :normalized normalized :hash content-hash})
           {:row (store/create! ds
-                               {:kind kind
+                               {:kind (derive-kind kind (:duration-ms pr))
                                 :path final-path
                                 :content_hash content-hash
                                 :name name
