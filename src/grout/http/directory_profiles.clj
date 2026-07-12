@@ -88,3 +88,15 @@
       {:status 200 :body (profile->body profile (store/count-by-tag ds tag)
                                         {:cached (= "ready" (:status profile))})}
       {:status 404 :body {:error "No profile exists for this tag"}})))
+
+(defn list-profiles-handler
+  "GET /grout/directory-profiles — the collection catalog: every profile with
+   its live item count and enrichment status, ordered by concept name. Backs a
+   'Collections' browse view (one entry per parent-directory tag group)."
+  [{:keys [ds]}]
+  (fn [_]
+    {:status 200
+     :body {:profiles (mapv (fn [p]
+                              (profile->body p (store/count-by-tag ds (:tag_value p))
+                                             {:cached (= "ready" (:status p))}))
+                            (dp/list-profiles ds))}}))

@@ -138,6 +138,11 @@
    [:timed-out {:optional true} [:boolean {:description "True when a wait=true request hit the inline timeout; the worker will finish it."}]]
    [:error {:optional true} [:maybe {:description "Last failure message when status=failed."} :string]]])
 
+(def DirectoryProfileList
+  [:map {:title "DirectoryProfileList"
+         :description "The collection catalog: every directory/tag-group profile with its live item count."}
+   [:profiles [:vector {:description "One entry per parent-directory tag group, ordered by concept name."} DirectoryProfile]]])
+
 (def TagPath
   [:map [:tag [:string {:description "Tag value, e.g. 'parent-directory:adam-neely-music'."}]]])
 

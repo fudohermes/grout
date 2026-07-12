@@ -129,6 +129,15 @@
   (->profile (exec-one ds ["SELECT * FROM directory_profiles WHERE tag_value = ?"
                            tag-value])))
 
+(defn list-profiles
+  "All profiles, ordered by concept name (case-insensitive) then tag. JSONB
+   columns are parsed. This is the collection catalog — one row per
+   parent-directory tag group."
+  [ds]
+  (mapv ->profile
+        (exec ds ["SELECT * FROM directory_profiles
+                   ORDER BY lower(concept_name), tag_value"])))
+
 (defn ensure-profile!
   "Ensure a `pending` profile row exists for `tag-value` with `concept-name`,
    race-free via the UNIQUE(tag_value) constraint. First writer wins the
