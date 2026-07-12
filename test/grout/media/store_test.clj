@@ -35,6 +35,21 @@
   (let [[q] (fmt {})]
     (is (re-find #"(?i)order by created_at desc" q))))
 
+(deftest default-order-has-id-tiebreaker
+  ;; A stable secondary sort keeps equal created_at values in a deterministic
+  ;; order so offset pagination doesn't shuffle rows between pages.
+  (let [[q] (fmt {})]
+    (is (re-find #"(?i)order by created_at desc, id desc" q))))
+
+(deftest offset-paginates-when-positive
+  (let [[q & params] (fmt {:offset 20 :limit 5})]
+    (is (re-find #"(?i)offset" q))
+    (is (some #{20} params))))
+
+(deftest offset-omitted-when-zero-or-absent
+  (is (not (re-find #"(?i)offset" (first (fmt {})))))
+  (is (not (re-find #"(?i)offset" (first (fmt {:offset 0}))))))
+
 (deftest no-filters-still-excludes-superseded
   (let [[q] (fmt {})]
     (is (re-find #"superseded_at IS NULL" q))))

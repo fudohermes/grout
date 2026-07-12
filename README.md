@@ -13,7 +13,7 @@ Grout does **retrieval, not scheduling** — packing stays with the caller (PV).
 |---|---|
 | `POST /grout/media` | Upload media (`multipart/form-data`): hash → probe → normalize → insert. No shared filesystem needed between caller and server. Dedups by content hash (`201` new, `200` matched/retagged/revived) |
 | `GET /grout/by-hash/:hash` | Look up an item by SHA-256 of the source bytes (CLI pre-check) |
-| `GET /grout/media` | Query by `channel`, `tags` (AND), `min_ms`/`max_ms`, `kind`, `random`, `limit` |
+| `GET /grout/media` | Query by `channel`, `tags` (AND), `min_ms`/`max_ms`, `kind`, `random`, `limit`, `offset` (paginate a stable listing for bulk sync). Item summaries carry `kind`/`channel`/`description`/`source` so a consumer can sync them without a per-item fetch. |
 | `GET /grout/media/:id` | Fetch one |
 | `PATCH /grout/media/:id` | Mutate `name`/`description`/`tags`/`channel` |
 | `DELETE /grout/media/:id` | Soft-delete (supersede); `?hard=true` unlinks the file |

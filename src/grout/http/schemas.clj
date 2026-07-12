@@ -56,12 +56,18 @@
 
 (def MediaSummary
   [:map {:title "MediaSummary"
-         :description "Compact media item returned by the query endpoint. Includes `path` for by-path streaming and `stream-url` for the HTTP fallback."}
+         :description "Compact media item returned by the query endpoint. Carries enough metadata (kind, channel, description, dimensions, source) for a consumer to sync the item into its own catalog without a per-item detail fetch. Includes `path` for by-path streaming and `stream-url` for the HTTP fallback."}
    [:id [:uuid {:description "Stable item id."}]]
+   [:kind {:optional true} [:maybe {:description "Media kind discriminator (bumper|filler|program)."} :string]]
    [:name {:optional true} [:maybe {:description "Human/AI title."} :string]]
+   [:description {:optional true} [:maybe {:description "Human/AI description."} :string]]
+   [:channel {:optional true} [:maybe {:description "Channel, or null for generic items."} :string]]
    [:duration-ms [:int {:description "Duration in milliseconds."}]]
+   [:width {:optional true} [:maybe {:description "Video width in pixels."} :int]]
+   [:height {:optional true} [:maybe {:description "Video height in pixels."} :int]]
    [:path [:string {:description "Absolute path on the shared mount."}]]
    [:stream-url [:string {:description "HTTP byte-range streaming fallback path."}]]
+   [:source {:optional true} [:maybe {:description "Provenance (e.g. tunarr-bumper|youtube|upload)."} :string]]
    [:vcodec {:optional true} [:maybe {:description "Video codec."} :string]]
    [:acodec {:optional true} [:maybe {:description "Audio codec."} :string]]
    [:tags [:vector {:description "Freeform tags."} :string]]])
@@ -79,6 +85,7 @@
    [:max_ms {:optional true} [:int {:description "Maximum duration in ms (inclusive)."}]]
    [:kind {:optional true} [:string {:description "Filter by kind (bumper|filler|program)."}]]
    [:limit {:optional true} [:int {:min 1 :description "Max items to return (default 10)."}]]
+   [:offset {:optional true} [:int {:min 0 :description "Number of items to skip; with `limit`, paginates a stable (non-random) listing for bulk sync sweeps."}]]
    [:random {:optional true} [:boolean {:description "When true, return a random sample."}]]])
 
 ;; POST /grout/media is a multipart/form-data upload (see grout.http.routes),
