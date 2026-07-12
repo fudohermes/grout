@@ -175,11 +175,11 @@
         "utils": "utils_2"
       },
       "locked": {
-        "lastModified": 1775612747,
-        "narHash": "sha256-JIZtIumcQ+6lUANwdf3IDIgmifD0DA7Wu4A0kcEVW1w=",
+        "lastModified": 1783293963,
+        "narHash": "sha256-zWNlaE3l4zHfWHvXRMI9rIsAmXjWB7c7o0EgUqqx74I=",
         "owner": "fudoniten",
         "repo": "fudo-nix-helpers",
-        "rev": "a18e082c30d92fc573363f0e64aec0374adf085d",
+        "rev": "d19d1ae9a352be72059e3afcecb5c3dfc5c993c7",
         "type": "github"
       },
       "original": {
