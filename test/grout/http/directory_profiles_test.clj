@@ -94,3 +94,31 @@
   (with-redefs [dp/get-profile-for-tag (fn [_ _] nil)]
     (is (= 404 (:status ((dirprof/get-profile-handler deps)
                          {:parameters {:path {:tag "nope"}}}))))))
+
+;; Regression: a profile row read from the DB has dimensions with string keys
+;; (Cheshire parses jsonb objects into Clojure maps with string keys), but the
+;; OpenAPI response schema declares [:map-of :keyword [:vector :string]]. If
+;; the keys are not normalized at the boundary, the response-coercion layer
+;; rejects the body with a 500 and a misleading "tags invalid type" log line
+;; (Malli reports the first failing key; the real failure is dimensions).
+;; The fix lives in `dp/->profile`; this test calls it through the stubbed
+;; `get-profile-for-tag` to exercise the real conversion path.
+;; See: live cluster bug, parent-directory:2019 row on 2026-07-12.
+(deftest get-profile-coerces-dimension-keys-to-keywords
+  (with-redefs [dp/get-profile-for-tag (fn [_ tag]
+                                         (dp/->profile
+                                          {:status "ready"
+                                           :tag_value tag
+                                           :item_count_at_enrichment 4
+                                           :dimensions {"channel" ["IQ2 Debates"]
+                                                        "audience" ["adult"]}
+                                           :tags ["debates" "iq2"]}))
+                store/count-by-tag     (fn [_ _] 4)]
+    (let [resp ((dirprof/get-profile-handler deps)
+                {:parameters {:path {:tag "parent-directory:x"}}})]
+      (is (= 200 (:status resp)))
+      (is (= ["IQ2 Debates"] (get-in resp [:body :dimensions :channel]))
+          "dimensions keys must be keywords, not strings")
+      (is (= ["adult"] (get-in resp [:body :dimensions :audience])))
+      (is (not (contains? (:dimensions (:body resp)) "channel"))
+          "no string keys should leak into the response body"))))

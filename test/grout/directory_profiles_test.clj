@@ -61,3 +61,34 @@
 (deftest growth-exceeded-false-on-shrinkage
   ;; Deletions don't invalidate an existing profile.
   (is (not (dp/growth-exceeded? {:item_count_at_enrichment 100} 80 20))))
+
+;; --- ->profile (DB row → response shape) -----------------------------------
+;;
+;; Regression for the live 500 on `GET /grout/directory-profiles/<tag>`:
+;; jsonb columns deserialize to Clojure data with STRING keys on the object
+;; values; the OpenAPI response schema declares `[:map-of :keyword ...]`,
+;; so the response-coercion layer rejects the body. The fix canonicalizes
+;; dimension keys to keywords in `->profile`.
+
+(deftest ->profile-canonicalizes-dimension-keys-to-keywords
+  (let [row {:status "ready"
+             :tag_value "parent-directory:2019"
+             :concept_name "Intelligence Squared 2019"
+             :dimensions {"channel" ["IQ2 Debates"] "audience" ["adult"]}
+             :tags ["debates" "iq2"]}
+        out (dp/->profile row)]
+    (is (= {:channel ["IQ2 Debates"] :audience ["adult"]}
+           (:dimensions out))
+        "string-keyed dimensions must be converted to keyword keys")
+    (is (= ["debates" "iq2"] (:tags out)))))
+
+(deftest ->profile-preserves-nil-dimensions
+  ;; A profile that has never been enriched (no row in directory_profiles with
+  ;; a dimensions jsonb value) must not 500.
+  (is (nil? (-> (dp/->profile {:status "pending" :tag_value "x" :dimensions nil :tags nil})
+                :dimensions))))
+
+(deftest ->profile-leaves-tags-alone
+  ;; `tags` is a vector of strings, not a map; `update-keys` would be a no-op
+  ;; and is intentionally not applied.
+  (is (= ["a" "b"] (-> (dp/->profile {:dimensions {} :tags ["a" "b"]}) :tags))))

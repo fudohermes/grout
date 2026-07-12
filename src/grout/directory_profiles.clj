@@ -41,12 +41,16 @@
     (string? v)             (json/parse-string v true)
     :else                   v))
 
-(defn- ->profile
-  "Coerce a raw row map into a profile: JSONB columns parsed to Clojure data."
+(defn ->profile
+  "Coerce a raw row map into a profile: JSONB columns parsed to Clojure data,
+  and the `dimensions` map's keys canonicalized to Clojure keywords (jsonb
+  parses to string keys, but the OpenAPI response schema and the worker
+  consumers expect `:channel`, `:audience`, etc.). `tags` is a vector of
+  strings — no key normalization needed."
   [row]
   (when row
     (-> row
-        (update :dimensions coerce-jsonb)
+        (update :dimensions #(some-> % (update-keys keyword) coerce-jsonb))
         (update :tags coerce-jsonb))))
 
 (defn- exec-one [ds sql-vec]
