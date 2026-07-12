@@ -13,10 +13,16 @@
 
 (defn- row->summary [row]
   {:id (:id row)
+   :kind (:kind row)
    :name (:name row)
+   :description (:description row)
+   :channel (:channel row)
    :duration-ms (:duration_ms row)
+   :width (:width row)
+   :height (:height row)
    :path (:path row)
    :stream-url (stream-url (:id row))
+   :source (:source row)
    :vcodec (:vcodec row)
    :acodec (:acodec row)
    :tags (vec (:tags row))})
@@ -109,6 +115,7 @@
                   :max-ms  (:max_ms q)
                   :kind    (:kind q)
                   :limit   (or (:limit q) 10)
+                  :offset  (:offset q)
                   :random  (boolean (:random q))}
           rows (store/query ds params)]
       {:status 200

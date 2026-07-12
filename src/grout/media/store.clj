@@ -118,11 +118,16 @@
    without a database.
 
    Params (all optional): :channel :tags(seq) :min-ms :max-ms :kind
-   :limit(default 10) :random :include-superseded?
+   :limit(default 10) :offset :random :include-superseded?
+
+   `:offset` skips that many rows; paired with `:limit` it paginates the
+   stable (non-random) listing so a consumer can sweep the whole catalog in
+   pages. The non-random order carries an `id` tiebreaker so equal
+   `created_at` values order deterministically across pages.
 
    Channel semantics: a channel filter matches the given channel OR
    generic (null-channel) items, which are usable on any channel."
-  [{:keys [channel tags min-ms max-ms kind limit random include-superseded?]
+  [{:keys [channel tags min-ms max-ms kind limit offset random include-superseded?]
     :or   {limit 10}}]
   (let [conds (cond-> []
                 (not include-superseded?) (conj [:= :superseded_at nil])
@@ -132,9 +137,10 @@
                 max-ms     (conj [:<= :duration_ms max-ms])
                 kind       (conj [:= :kind kind]))]
     (cond-> {:select [:*] :from :grout_media :limit limit}
-      (seq conds)  (assoc :where (into [:and] conds))
-      random       (assoc :order-by [[[:raw "random()"]]])
-      (not random) (assoc :order-by [[:created_at :desc]]))))
+      (seq conds)                (assoc :where (into [:and] conds))
+      (and offset (pos? offset)) (assoc :offset offset)
+      random                     (assoc :order-by [[[:raw "random()"]]])
+      (not random)               (assoc :order-by [[:created_at :desc] [:id :desc]]))))
 
 (defn query
   "Run a media query (see ->query-sqlmap) and return the matching rows."
