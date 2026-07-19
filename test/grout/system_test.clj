@@ -30,6 +30,14 @@
     (is (= profile (get-in c [:grout/media :profile])))
     (is (= "/m"   (get-in c [:grout/media :media-dir])))))
 
+(deftest media-staging-dir-threaded-through
+  (testing "explicit :staging-dir is passed through"
+    (let [c (system/->system-config {:media {:media-dir "/m" :staging-dir "/m/.staging"}})]
+      (is (= "/m/.staging" (get-in c [:grout/media :staging-dir])))))
+  (testing "falls back to a subdirectory when unset"
+    (let [c (system/->system-config {:media {:media-dir "/m"}})]
+      (is (= "/data/media/grout/.staging" (get-in c [:grout/media :staging-dir]))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Regression: the runtime crash on the live cluster (2026-07-07) was
 ;; caused by the :grout/tunarr-scheduler init-key being invoked with

@@ -64,6 +64,7 @@
                        :descriptions (or dimension-descriptions {})}
    :grout/media {:db (ig/ref :grout/db)
                  :media-dir (:media-dir (or media {:media-dir "/data/media/grout"}))
+                 :staging-dir (or (:staging-dir media) "/data/media/grout/.staging")
                  :profile (:profile media)
                  :tunabrain (ig/ref :grout/tunabrain)
                  ;; dim-config is wired at init time (see :grout/media
@@ -162,7 +163,7 @@
 (defmethod ig/halt-key! :grout/dim-catalog [_ _]
   nil)
 
-(defmethod ig/init-key :grout/media [_ {:keys [db media-dir profile tunabrain dim-catalog sample-count]}]
+(defmethod ig/init-key :grout/media [_ {:keys [db media-dir staging-dir profile tunabrain dim-catalog sample-count]}]
   (let [dim-config (build-dim-config dim-catalog)
         ;; Force the (memoised) host GPU probe now, at startup, rather than
         ;; lazily on the first intake transcode — `grout.media.accel`'s
@@ -173,8 +174,8 @@
     (log/info "FFmpeg transcode acceleration ready"
               {:requested-accel (get profile :accel :auto)
                :available-accels available-accels})
-    (log/info "Media store ready" {:media-dir media-dir :dim-config-count (count dim-config)})
-    {:ds db :media-dir media-dir :profile profile
+    (log/info "Media store ready" {:media-dir media-dir :staging-dir staging-dir :dim-config-count (count dim-config)})
+    {:ds db :media-dir media-dir :staging-dir staging-dir :profile profile
      :tunabrain tunabrain
      ;; The orchestrator reads (:dim-config tunabrain) — see
      ;; enrichment.worker/run-once! and http.media/enrich-handler.
