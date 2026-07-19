@@ -230,7 +230,10 @@ The capability Jellyfin never gave us — own the pool size:
 ## 11. Config / deploy
 
 - Env: `DATABASE_URL`, `TUNABRAIN_URL`, `GROUT_MEDIA_DIR` (default
-  `/data/media/grout`), playout-profile overrides, retention caps.
+  `/data/media/grout`), `GROUT_STAGING_DIR` (default
+  `/data/media/grout/.staging` — where multipart uploads are spooled before
+  intake; kept off the JVM's default temp dir, which is often a small ramdisk
+  in containers), playout-profile overrides, retention caps.
 - ffmpeg/ffprobe in the container image (nix flake, as TS).
 - Integrant components: logger → db (pool + migratus) → tunabrain-client →
   media-store → enrichment-worker → retention-job → http-server.

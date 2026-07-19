@@ -60,6 +60,7 @@ Environment variables (see `resources/config.edn` for the full set and defaults)
 | `GROUT_DATABASE_URL` / `DATABASE_URL` | JDBC URL |
 | `GROUT_DATABASE_USER` / `GROUT_DATABASE_PASS` | DB credentials |
 | `GROUT_MEDIA_DIR` | Blob directory on the arr-data mount (default `/data/media/grout`) |
+| `GROUT_STAGING_DIR` | Upload staging directory (default `/data/media/grout/.staging`); spooled uploads are deleted as soon as intake finishes, so this only needs headroom for in-flight uploads. Point it at a real volume — it defaults away from the JVM's temp dir, which is often a small ramdisk in containers |
 | `TUNABRAIN_URL` | Tunabrain gateway endpoint |
 | `GROUT_HTTP_PORT` | HTTP port (default 8080) |
 | `GROUT_ENRICHMENT_ENABLED`, `GROUT_RETENTION_ENABLED` | Toggle background jobs |

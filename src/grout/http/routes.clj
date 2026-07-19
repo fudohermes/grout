@@ -13,7 +13,8 @@
             [grout.http.media :as media]
             [grout.http.middleware :as mw]
             [grout.http.schemas :as s]
-            [grout.http.stream :as stream]))
+            [grout.http.stream :as stream]
+            [grout.http.upload :as upload]))
 
 (defn health-handler
   "Construct the health handler, closing over the datasource."
@@ -66,7 +67,12 @@
      :post {:tags ["media"]
             :summary "Upload media (multipart/form-data): hash + probe + normalize + insert. Dedups by content hash: 201 when newly stored, 200 when an existing item was matched/retagged/revived."
             :description "multipart/form-data fields: `file` (required — the media bytes), `kind` (required: bumper|filler|program), `channel`, `tags` (comma-separated), `source`, `source-url`, `name`, `description`. No shared filesystem is required between caller and server; the upload is streamed to the server and hashed/normalized there."
-            :middleware [wrap-multipart-params]
+            :middleware [(fn [handler]
+                          (wrap-multipart-params
+                           handler
+                           {:store (upload/staging-file-store
+                                    (or (:staging-dir media)
+                                        (System/getProperty "java.io.tmpdir")))}))]
             :responses {200 {:body s/Media}
                         201 {:body s/Media}
                         400 {:body s/APIError}

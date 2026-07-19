@@ -9,6 +9,14 @@
             :password  #or [#env GROUT_DATABASE_PASS "grout"]}
 
  :media {:media-dir #or [#env GROUT_MEDIA_DIR "/data/media/grout"]
+         ;; Where POST /grout/media spools uploaded multipart bytes before
+         ;; they're hashed/normalized into :media-dir. Defaults to a
+         ;; subdirectory of :media-dir (a real, deployment-sized volume)
+         ;; rather than the JVM's default temp dir, which is often a small
+         ;; ramdisk in containerized deployments and can fill up under
+         ;; large/concurrent uploads. Files here are deleted as soon as
+         ;; each upload finishes (see grout.http.media/intake-handler).
+         :staging-dir #or [#env GROUT_STAGING_DIR "/data/media/grout/.staging"]
          ;; Playout profile for intake normalization (GROUT.md §8).
          ;; :accel picks the transcode backend (grout.media.accel):
          ;;   auto  -> hardware (NVENC/VAAPI) when the host exposes a GPU,
