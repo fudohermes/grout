@@ -156,5 +156,7 @@ flake checks.
   by-path + range streaming, health
 - ✅ Enrichment worker (Tunabrain) + `PATCH` metadata editing
 - ✅ Retention/lifecycle job
-- ☐ Repoint TS bumper pipeline at Grout (lives in the TS service)
+- ✅ Repoint TS bumper pipeline at Grout (lives in the TS service) — TS now
+  uploads via the multipart `POST /grout/media` contract instead of a shared
+  filesystem
 - ☐ YouTube/long-form ingest (later, separable)
