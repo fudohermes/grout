@@ -22,9 +22,9 @@ programs.
 - **Pseudovision (PV)** — playout engine. Streams IPTV television channels.
   Queries Grout for gap-appropriate filler and streams it (ideally by
   shared-filesystem path).
-- **Tunarr Scheduler (TS)** — plans schedules, generates bumpers. Will write
-  generated bumpers into Grout via intake (replacing today's Jellyfin
-  scan→poll→collection dance).
+- **Tunarr Scheduler (TS)** — plans schedules, generates bumpers. Uploads
+  generated bumpers into Grout via intake (a multipart HTTP POST — no shared
+  filesystem — replacing today's Jellyfin scan→poll→collection dance).
 - **Tunabrain** — LLM/AI gateway (OpenRouter). Grout calls it for metadata
   enrichment (tags/name/description). Grout holds **no** model keys.
 - **Marquee** — UI/gateway. Grout exposes the same REST conventions as TS/PV.
@@ -105,9 +105,12 @@ CREATE INDEX grout_media_live ON grout_media (superseded_at) WHERE superseded_at
 REST, Malli-validated, JSON. All list/query results exclude `superseded_at IS
 NOT NULL` unless explicitly asked.
 
-- `POST /grout/media` — **intake**. Body references a file already on the mount
-  (`{:path ... :kind ... :channel ... :tags [...] :source ...}`) or accepts an
-  upload. Runs the intake pipeline (§8) and returns the created row. `201`.
+- `POST /grout/media` — **intake**. `multipart/form-data` upload: `file` is the
+  media bytes, `kind`/`channel`/`tags` (comma-separated)/`source`/`source-url`/
+  `name`/`description` are plain fields. No filesystem is shared between caller
+  and server — bytes are streamed and spooled to a server-side temp file. Runs
+  the intake pipeline (§8) and returns the created row. `201` (or `200` if
+  matched by hash).
 - `GET /grout/media` — **query**. Query params:
   - `channel` (optional; matches the channel OR generic/null items — decide and
     document the semantics)
@@ -136,7 +139,8 @@ Query example (the target UX):
 
 ## 8. Intake pipeline
 
-For each incoming file (already on the arr-data mount):
+For each uploaded file (bytes streamed via the multipart POST, spooled to a
+server-side temp file, then moved onto the arr-data mount as part of intake):
 1. `ffprobe` → extract `duration_ms`, `width`, `height`, `vcodec`, `acodec`.
 2. If off playout-profile, **transcode/normalize** to the profile and rewrite
    the file. Profile = the same one TS uses for bumpers:

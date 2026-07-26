@@ -41,9 +41,11 @@ programs.* See `GROUT.md §1`.
   `path` field in responses is the primary stream path (co-mounted file
   system); the HTTP `/stream` endpoint is the fallback.
 - **Tunarr Scheduler** is the primary writer for generated bumpers. Since
-  commit `8df074d` (Jul 2026) the bumper pipeline stages to Grout instead
-  of Jellyfin. The ffmpeg compose step runs in Tunarr Scheduler; Grout
-  receives the finished file via `POST /grout/media`.
+  commit `8df074d` (Jul 2026) the bumper pipeline uploads to Grout instead
+  of Jellyfin. The ffmpeg compose step runs in Tunarr Scheduler on its own
+  local disk; Grout receives the finished file as a `multipart/form-data`
+  upload via `POST /grout/media` — no filesystem is shared between the two
+  services.
 - **Tunabrain** is invoked for metadata enrichment (`POST /grout/media/:id/enrich`).
   Grout passes the source-file content and asks Tunabrain for tags, name,
   and description. Grout holds no model keys; the Tunabrain client is
@@ -130,7 +132,7 @@ resources/
 
 | Method & path | Purpose |
 |---|---|
-| `POST /grout/media` | Intake a file on the mount: hash → probe → normalize → insert. Dedups by content hash (`201` new, `200` matched/retagged/revived) |
+| `POST /grout/media` | Intake via `multipart/form-data` upload (`file` + `kind`/`channel`/`tags`/…): hash → probe → normalize → insert. No filesystem shared with the caller. Dedups by content hash (`201` new, `200` matched/retagged/revived) |
 | `GET /grout/by-hash/:hash` | Look up an item by SHA-256 of the source bytes (CLI pre-check) |
 | `GET /grout/media` | Query by `channel`, `tags` (AND), `min_ms`/`max_ms`, `kind`, `random`, `limit` |
 | `GET /grout/media/:id` | Fetch one |
