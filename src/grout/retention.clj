@@ -1,5 +1,5 @@
 (ns grout.retention
-  "Retention/lifecycle job (GROUT.md §10). Enforces a cap of N live items per
+  "Retention/lifecycle job (archive/GROUT.md §10). Enforces a cap of N live items per
    (channel, kind, duration-bucket), superseding the oldest first — giving teeth
    to TS's max-bumpers-per-channel intent and keeping the AI-regenerated pool
    from growing unbounded."

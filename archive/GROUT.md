@@ -1,3 +1,8 @@
+> **Archived design brief** (July 2026). Kept because code comments cite its
+> sections. It isn't maintained and parts are out of date (AI now fills blank
+> names and descriptions, and long-form enrichment exists). The current design
+> rules are in [README.md](../README.md); ongoing work is in [PLAN.md](../PLAN.md).
+
 # Grout — Filler & Interstitial Media Store
 
 > Implementation brief for a new service. Written for an implementer starting cold.

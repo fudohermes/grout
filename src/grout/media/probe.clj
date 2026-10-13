@@ -1,5 +1,5 @@
 (ns grout.media.probe
-  "ffprobe/ffmpeg wrapper for the intake pipeline (GROUT.md §8).
+  "ffprobe/ffmpeg wrapper for the intake pipeline (archive/GROUT.md §8).
 
    Extracts technical metadata and normalizes off-profile media to PV's playout
    profile with a faststart moov atom, so PV can seek/stream without a full
@@ -72,7 +72,7 @@
     (str (if (pos? dot) (subs path 0 dot) path) ext)))
 
 ;; Transcode to the playout profile, offloading video encode to the GPU when a
-;; backend is available (GROUT.md §8). `accel/resolve-accel` downgrades to
+;; backend is available (archive/GROUT.md §8). `accel/resolve-accel` downgrades to
 ;; software on CPU-only hosts, so this same arg vector is correct everywhere.
 ;; The hardware paths add pre-`-i` device flags and a `-vf` hwupload; software
 ;; keeps the original `-pix_fmt` conversion (GPU frames are formatted by the

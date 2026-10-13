@@ -1,6 +1,6 @@
 (ns grout.media.store-test
   "Unit tests for the honeysql query builder. These exercise SQL generation
-   only (no database), covering the query semantics from GROUT.md §7/§15."
+   only (no database), covering the query semantics from archive/GROUT.md §7/§15."
   (:require [clojure.test :refer [deftest is]]
             [honey.sql :as sql]
             [grout.media.store :as store]))

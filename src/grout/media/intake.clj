@@ -1,5 +1,5 @@
 (ns grout.media.intake
-  "Intake pipeline (GROUT.md §8) with content-addressed dedup.
+  "Intake pipeline (archive/GROUT.md §8) with content-addressed dedup.
 
    Flow: hash the ORIGINAL source bytes -> if a row with that hash exists,
    deduplicate (union tags, fill blank metadata, revive if superseded) without

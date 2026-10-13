@@ -7,7 +7,7 @@
 
    Response bodies use kebab-case keys to match the service-wide JSON
    convention (see grout.http.middleware). Query parameters use the snake_case
-   names from the GROUT.md query example (min_ms, max_ms).")
+   names from the archive/GROUT.md query example (min_ms, max_ms).")
 
 (def Kind
   [:enum {:description "Media kind discriminator."}
