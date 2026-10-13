@@ -1,5 +1,5 @@
 (ns grout.media.enrich
-  "Enrichment orchestration (GROUT.md §9): read a row, ask Tunabrain to
+  "Enrichment orchestration (archive/GROUT.md §9): read a row, ask Tunabrain to
   enrich it via /enrich/short-form, merge, and persist with
   `enriched=true`.
 

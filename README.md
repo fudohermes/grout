@@ -1,25 +1,49 @@
 # Grout — Filler & Interstitial Media Store
 
-Grout is a small storage-and-retrieval service for **filler media** (bumpers,
-interstitials, idents, and later orphan long-form clips). It stores media in a
-flat structure, filters by **tags + duration**, owns its metadata, and streams
-to Pseudovision. See [`GROUT.md`](GROUT.md) for the full brief.
+Grout is a small storage-and-retrieval service for **filler media**: bumpers,
+interstitials, idents, and orphan long-form clips (YouTube channels, video
+essays) that don't fit Jellyfin's metadata-provider worldview. It stores media
+flat, filters by **tags + duration**, owns its metadata, and serves files to
+Pseudovision. Metadata is AI-enriched through Tunabrain.
 
-Grout does **retrieval, not scheduling** — packing stays with the caller (PV).
+The name: grout fills the gaps between tiles; Grout fills the gaps between
+programs.
+
+Ongoing work lives in [PLAN.md](PLAN.md). Conventions and pitfalls for
+contributors are in [AGENTS.md](AGENTS.md).
+
+## Design rules
+
+1. **Retrieval, not scheduling.** Grout answers "what filler matches X?" It
+   never packs a timeline or decides ordering; that stays with PV.
+2. **Serve by path first.** PV is co-mounted on `arr-data` and plays the
+   `path` from query results directly. `GET /grout/media/:id/stream` is the
+   fallback for callers without the mount.
+3. **AI only through Tunabrain.** Grout holds no model credentials. If
+   enrichment needs something new, extend Tunabrain's API.
+4. **Normalize once, at intake.** Every item is ffprobed and, if needed,
+   transcoded to PV's playout profile (`libx264 / yuv420p / aac 192k / 48 kHz
+   stereo`, `+faststart`) before it's queryable. No transcoding on read.
+5. **Flat and tag-based.** No seasons, episodes, watch state, or scrapers;
+   don't reimplement Jellyfin. Groups (a creator, a series) are expressed as
+   `parent-directory:<slug>` tags with a shared directory profile.
 
 ## HTTP API
 
 | Method & path | Purpose |
 |---|---|
-| `POST /grout/media` | Upload media (`multipart/form-data`): hash → probe → normalize → insert. No shared filesystem needed between caller and server. Dedups by content hash (`201` new, `200` matched/retagged/revived) |
+| `POST /grout/media` | Upload media (`multipart/form-data`): hash → probe → normalize → insert. Dedups by content hash (`201` new, `200` matched/retagged/revived) |
 | `GET /grout/by-hash/:hash` | Look up an item by SHA-256 of the source bytes (CLI pre-check) |
-| `GET /grout/media` | Query by `channel`, `tags` (AND), `min_ms`/`max_ms`, `kind`, `random`, `limit`, `offset` (paginate a stable listing for bulk sync). Item summaries carry `kind`/`channel`/`description`/`source` so a consumer can sync them without a per-item fetch. |
+| `GET /grout/media` | Query by `channel`, `tags` (AND), `min_ms`/`max_ms`, `kind`, `random`, `limit`, `offset`. Summaries carry `kind`/`channel`/`description`/`source` so a consumer can sync without per-item fetches |
 | `GET /grout/media/:id` | Fetch one |
 | `PATCH /grout/media/:id` | Mutate `name`/`description`/`tags`/`channel` |
 | `DELETE /grout/media/:id` | Soft-delete (supersede); `?hard=true` unlinks the file |
 | `GET /grout/media/:id/stream` | Byte-range HTTP streaming fallback (`Range` → `206`) |
 | `GET`/`POST /grout/media/:id/tags` | List / add tags |
-| `POST /grout/media/:id/enrich` | Trigger Tunabrain metadata enrichment |
+| `POST /grout/media/:id/enrich` | Trigger Tunabrain enrichment for one item |
+| `POST /grout/enrich-by-tag/:tag` | Derive or refresh a shared profile for every item carrying a tag (usually `parent-directory:<x>`); async unless `wait=true` |
+| `GET /grout/directory-profiles` | List directory profiles with item counts and enrichment status |
+| `GET`/`PATCH /grout/directory-profiles/:tag` | Read a profile, or override its dimensions/tags by hand (locks it against re-enrichment) |
 | `GET /health` | Health/readiness |
 | `GET /api/version` | Build info |
 | `GET /openapi.json`, `/swagger-ui` | API docs |
@@ -31,8 +55,7 @@ GET /grout/media?channel=britannia&tags=daytime,fun,kids&min_ms=65000&max_ms=900
 ```
 
 **Channel semantics:** a `channel=X` query matches that channel **or**
-generic (null-channel) items, which are usable on any channel (resolves
-`GROUT.md` §14). Response bodies use kebab-case keys (`duration-ms`,
+generic (null-channel) items, which are usable on any channel. Response bodies use kebab-case keys (`duration-ms`,
 `stream-url`) per the service-wide JSON convention.
 
 ### Content-addressed storage
@@ -51,6 +74,26 @@ tag it, just upload again with tags. A CLI can hash the local file, `GET
 simply add tags via `PATCH`/`POST …/tags` without re-uploading (see
 `grout-cli` below, which does exactly this).
 
+## AI enrichment
+
+A background worker picks up un-enriched items and calls Tunabrain's
+`/enrich/short-form`; the directory worker calls `/enrich/profile` once per
+`parent-directory:` group and fans the result out to every item in it.
+
+- **Dimensions come from Tunarr Scheduler.** At startup Grout fetches
+  `GET /api/dimensions` and each dimension's values from TS, and sends that
+  catalog to Tunabrain. Per-dimension descriptions live in
+  `resources/config.edn` (`:dimension-descriptions`). If TS is unreachable,
+  enrichment runs with an empty catalog: free-form tags still work and
+  dimension validation is skipped.
+- **Dimension values are validated on the way back.** `grout.dimensions` drops
+  any value Tunabrain returns that isn't in TS's vocabulary (and logs it)
+  before it becomes a `dim:value` tag or sets `channel`. TS's
+  `curation.dimensions` applies the same rule.
+- **AI fills `name` and `description` only when they're blank.** Human edits
+  are never overwritten. A directory profile you `PATCH` by hand is locked
+  until `force=true` or `{"locked": false}`.
+
 ## Configuration
 
 Environment variables (see `resources/config.edn` for the full set and defaults):
@@ -62,8 +105,10 @@ Environment variables (see `resources/config.edn` for the full set and defaults)
 | `GROUT_MEDIA_DIR` | Blob directory on the arr-data mount (default `/data/media/grout`) |
 | `GROUT_STAGING_DIR` | Upload staging directory (default `/data/media/grout/.staging`); spooled uploads are deleted as soon as intake finishes, so this only needs headroom for in-flight uploads. Point it at a real volume — it defaults away from the JVM's temp dir, which is often a small ramdisk in containers |
 | `TUNABRAIN_URL` | Tunabrain gateway endpoint |
+| `TUNARR_SCHEDULER_URL` | Source of the dimension catalog (blank disables dimension validation) |
+| `GROUT_FFMPEG_ACCEL` | Hardware acceleration for intake transcodes (default `auto`) |
 | `GROUT_HTTP_PORT` | HTTP port (default 8080) |
-| `GROUT_ENRICHMENT_ENABLED`, `GROUT_RETENTION_ENABLED` | Toggle background jobs |
+| `GROUT_ENRICHMENT_ENABLED`, `GROUT_DIRECTORY_ENRICHMENT_ENABLED`, `GROUT_RETENTION_ENABLED` | Toggle background jobs |
 
 Finer knobs (intervals, retention cap/bucket, playout profile) are set in
 `config.edn` or an override file passed with `-c`.
@@ -134,29 +179,22 @@ file — logs and grout-cli's by-hash dedup remain the safety net). Anything aft
 `-s`/`--server` or `$GROUT_URL`; keep `--state-dir` on a persistent volume,
 since the container filesystem is not. See `grout-bulk --help` for all options.
 
-## Running
+## Running and testing
+
+Needs PostgreSQL, a writable `GROUT_MEDIA_DIR`, Java 21+, and `ffmpeg`/`ffprobe`
+on `PATH` (`nix develop .#grout` provides them).
 
 ```sh
 clojure -X:migrate            # apply migrations
-clojure -M:run                # start the service
+clojure -M:run                # start the service (config: resources/config.edn)
 clojure -M:run -c my.edn      # with an override config
-clojure -M:test               # run the test suite (kaocha)
+clojure -M:test               # server test suite (Kaocha)
+bb test                       # grout-cli / grout-bulk tests (Babashka)
+nix flake check               # server tests + clj-kondo lint
 ```
 
-The nix flake builds the service and migration containers and runs tests/lint as
-flake checks.
+Integrant components:
+`logger → db → tunarr-scheduler → dim-catalog → tunabrain → media → enrichment-worker / directory-worker / retention-job → http`.
 
-## Integrant components
-
-`logger → db → tunabrain → media (store) → enrichment-worker → retention-job → http`
-
-## Build-order status (`GROUT.md` §13)
-
-- ✅ MVP: schema/migrations, intake (probe + normalize + faststart), query,
-  by-path + range streaming, health
-- ✅ Enrichment worker (Tunabrain) + `PATCH` metadata editing
-- ✅ Retention/lifecycle job
-- ✅ Repoint TS bumper pipeline at Grout (lives in the TS service) — TS now
-  uploads via the multipart `POST /grout/media` contract instead of a shared
-  filesystem
-- ☐ YouTube/long-form ingest (later, separable)
+`archive/GROUT.md` is the original design brief, kept because code comments
+cite its sections.

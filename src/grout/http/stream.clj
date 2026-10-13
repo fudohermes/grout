@@ -1,5 +1,5 @@
 (ns grout.http.stream
-  "Byte-range HTTP streaming fallback (GROUT.md §7). PV's primary path is
+  "Byte-range HTTP streaming fallback (archive/GROUT.md §7). PV's primary path is
    by-path off the shared mount; this endpoint serves remote/non-co-mounted
    callers and honours HTTP Range requests."
   (:require [clojure.java.io :as io]
@@ -49,7 +49,7 @@
   For a typical video Range request the slice is 1-10 MB (HTTP video
   seekers use small ranges; long sequential reads should not be served
   via HTTP at all — use the by-path fast path on the shared mount, which
-  is the documented primary path per GROUT.md §7). The memory cost is
+  is the documented primary path per archive/GROUT.md §7). The memory cost is
   bounded by the request's own `Content-Length`."
   ^InputStream [^File f ^long start ^long length]
   (let [buf (byte-array length)

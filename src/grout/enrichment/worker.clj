@@ -1,5 +1,5 @@
 (ns grout.enrichment.worker
-  "Background enrichment worker (GROUT.md §9/§11). Periodically sweeps
+  "Background enrichment worker (archive/GROUT.md §9/§11). Periodically sweeps
    enriched=false rows and enriches them via Tunabrain, so intake never blocks
    on the AI call."
   (:require [grout.media.enrich :as enrich]

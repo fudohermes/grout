@@ -1,6 +1,6 @@
 (ns grout.media.accel
   "Hardware-acceleration backend selection for the intake transcode
-   (GROUT.md §8).
+   (archive/GROUT.md §8).
 
    Grout's transcode is a one-shot file->file normalize, not a live HLS
    encode, so this is a deliberately trimmed-down cousin of Pseudovision's
