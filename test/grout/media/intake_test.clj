@@ -110,7 +110,7 @@
 (deftest non-unique-sql-error-propagates
   ;; Only a unique violation is swallowed as a dedup; any other DB error must
   ;; still surface so it isn't silently misreported as a successful store.
-  (with-redefs [hash/sha256-file    (fn [_] "h")
+  (with-redefs [hash/sha256-file    (fn [_] "h1")
                 store/find-by-hash  (fn [_ _] nil)
                 probe/normalize-to! (fn [_ out _] {:path out :probe {:duration-ms 1000} :normalized false})
                 store/create!       (fn [_ _] (throw (java.sql.SQLException. "connection lost" "08006")))]

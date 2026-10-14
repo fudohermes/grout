@@ -36,12 +36,16 @@
 (defn- coerce-jsonb
   "Parse a JSONB column value to Clojure data. Handles a PGobject, a raw String,
    or an already-parsed value (when the global next.jdbc ReadableColumn
-   extension in `grout.media.store` is loaded). nil stays nil."
+   extension in `grout.media.store` is loaded). nil stays nil. A String that
+   isn't valid JSON passes through unchanged — an already-decoded jsonb SCALAR
+   (e.g. a lone tag or a context blob) reaches us as a plain string that must
+   not be re-parsed; the callers are defensive about such mis-shaped values."
   [v]
   (cond
     (nil? v)                nil
     (instance? PGobject v)  (json/parse-string (.getValue ^PGobject v) true)
-    (string? v)             (json/parse-string v true)
+    (string? v)             (try (json/parse-string v true)
+                                 (catch Exception _ v))
     :else                   v))
 
 (defn- coerce-dimensions

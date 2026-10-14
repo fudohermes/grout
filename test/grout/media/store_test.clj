@@ -18,7 +18,7 @@
     (is (re-find #"superseded_at IS NULL" q) "excludes superseded by default")
     (is (re-find #"channel = \?" q) "legacy exact channel match")
     (is (re-find #"channels @> CAST\(ARRAY" q) "multi-channel containment match")
-    (is (re-find #"channel IS NULL AND channels IS NULL" q) "generic = both unset")
+    (is (re-find #"\(?channel IS NULL\)? AND \(?channels IS NULL\)?" q) "generic = both unset")
     (is (re-find #"tags @> CAST\(ARRAY" q) "tag AND via containment")
     (is (re-find #"duration_ms >= \?" q) "min duration inclusive")
     (is (re-find #"duration_ms <= \?" q) "max duration inclusive")
@@ -77,7 +77,7 @@
   (let [[q & params] (fmt {:channel "toontown"})]
     (is (re-find #"channel = \?" q))
     (is (re-find #"channels @> CAST\(ARRAY\[\?\] AS text\[\]\)" q))
-    (is (re-find #"channel IS NULL AND channels IS NULL" q))
+    (is (re-find #"\(?channel IS NULL\)? AND \(?channels IS NULL\)?" q))
     (is (= 2 (count (filter #{"toontown"} params)))
         "the channel param is bound twice: legacy exact match + containment check")))
 
