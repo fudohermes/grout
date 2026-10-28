@@ -12,14 +12,16 @@
 
    Three backends: software (`:none`), NVIDIA NVENC (`:nvenc`), and VAAPI
    (`:vaapi`, Intel/AMD). Detection is a cheap filesystem probe of the render
-   nodes and the NVIDIA device node; when a requested backend is unavailable
+   nodes and the NVIDIA device node, plus a one-frame NVENC smoke encode when
+   that device is present; when a requested backend is unavailable
    on this host we fall back (to the other hardware backend, then software)
    with a warning, so the same image runs unchanged on GPU and CPU-only
    nodes."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [taoensso.timbre :as log])
-  (:import [java.io File]))
+  (:import [java.io File]
+           [java.util.concurrent TimeUnit]))
 
 (def default-vaapi-device
   "Default DRM render node used to init the VAAPI device."
@@ -52,14 +54,54 @@
                   "unknown"))))
         (range 128 144)))
 
+(def ^:private ffmpeg-bin (or (System/getenv "FFMPEG_PATH") "ffmpeg"))
+
+(def ^:private nvenc-probe-timeout-secs 20)
+
+(defn- nvenc-usable?
+  "Whether NVENC actually works here, checked with a one-frame encode.
+
+   /dev/nvidia0 alone is not proof: the device node can be injected while the
+   userspace driver (libcuda.so.1, libnvidia-encode.so.1) is missing or sits
+   where this ffmpeg's loader never looks. nixpkgs' glibc ignores
+   /etc/ld.so.cache and doesn't search /usr/lib64, so the CDI-injected driver
+   is only found via LD_LIBRARY_PATH (set in the image, see flake.nix). Without
+   this check such a host advertises :nvenc and every transcode then dies at
+   `-init_hw_device cuda` instead of falling back to software."
+  []
+  (try
+    (let [proc (-> (ProcessBuilder.
+                    ^java.util.List
+                    [ffmpeg-bin "-hide_banner" "-loglevel" "error"
+                     "-init_hw_device" "cuda=cu"
+                     "-f" "lavfi" "-i" "nullsrc=s=256x256"
+                     "-frames:v" "1" "-c:v" "h264_nvenc" "-f" "null" "-"])
+                   (.redirectErrorStream true)
+                   (.start))
+          ;; Drain output on a separate thread so a chatty failure can't fill
+          ;; the pipe and block the process before it exits.
+          out  (future (slurp (.getInputStream proc)))]
+      (if (.waitFor proc nvenc-probe-timeout-secs TimeUnit/SECONDS)
+        (or (zero? (.exitValue proc))
+            (do (log/warn "NVIDIA device present but NVENC probe encode failed; NVENC disabled"
+                          {:exit (.exitValue proc) :output (str/trim (deref out 1000 ""))})
+                false))
+        (do (.destroyForcibly proc)
+            (log/warn "NVENC probe encode timed out; NVENC disabled"
+                      {:timeout-secs nvenc-probe-timeout-secs})
+            false)))
+    (catch Exception e
+      (log/warn e "NVENC probe encode could not run; NVENC disabled")
+      false)))
+
 (defn accels-from
   "Pure decision: given the DRM render-node drivers and whether an NVIDIA
    device node is present, which accel backends are available.
 
    VAAPI requires a render node that is NOT nvidia-backed (an iHD/AMD VAAPI
-   stack cannot drive an NVIDIA node). NVENC requires an actual /dev/nvidia*
-   device (the NVIDIA DRM render node alone, without the injected userspace
-   driver, cannot encode)."
+   stack cannot drive an NVIDIA node). NVENC requires a working NVIDIA device:
+   `nvidia-device?` is true only when /dev/nvidia0 exists AND a probe encode
+   succeeded (see `nvenc-usable?`)."
   [render-drivers nvidia-device?]
   (cond-> #{:none}
     (some #(not= % "nvidia") render-drivers) (conj :vaapi)
@@ -69,24 +111,27 @@
   "Probes the host for available hardware-acceleration backends. Returns a set
    always containing :none plus any of :nvenc / :vaapi actually usable here.
 
-   Logs the raw probe inputs (render-node drivers, NVIDIA device presence)
-   alongside the resulting set, so a host that unexpectedly lands on software
+   Logs the raw probe inputs (render-node drivers, NVIDIA device presence,
+   NVENC probe result) alongside the resulting set, so a host that unexpectedly lands on software
    encoding can be diagnosed from the startup log alone — e.g. an NVIDIA-only
    render node correctly yields no :vaapi (see `accels-from`), which reads as
    surprising without the driver list."
   []
   (let [drivers (render-node-drivers)
         nvidia? (file-exists? "/dev/nvidia0")
-        accels  (accels-from drivers nvidia?)]
+        nvenc?  (and nvidia? (nvenc-usable?))
+        accels  (accels-from drivers nvenc?)]
     (log/info "Detected FFmpeg hardware-acceleration backends"
               {:available accels
                :render-node-drivers drivers
-               :nvidia-device-present nvidia?})
+               :nvidia-device-present nvidia?
+               :nvenc-usable nvenc?})
     accels))
 
 (def available-accels
-  "Memoised set of accel backends available on this host. Detection is a cheap
-   filesystem probe; memoised so it runs once per process."
+  "Memoised set of accel backends available on this host. Detection is a
+   filesystem probe plus, on NVIDIA hosts, a one-frame probe encode; memoised
+   so it runs once per process."
   (memoize detect-accels))
 
 ;; ---------------------------------------------------------------------------

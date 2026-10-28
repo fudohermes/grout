@@ -70,8 +70,8 @@
             # Keep ffmpeg/ffprobe on PATH for the intake/normalize pipeline.
             # nixpkgs' ffmpeg is built with --enable-nvenc and --enable-vaapi,
             # so hardware-accelerated intake transcode (grout.media.accel)
-            # needs no special ffmpeg build: NVENC's encode library is injected
-            # at runtime by the `nvidia` runtimeClass, and VAAPI needs a
+            # needs no special ffmpeg build: NVENC's driver libraries are
+            # injected at runtime by CDI (see LD_LIBRARY_PATH below), and VAAPI needs a
             # userspace driver shipped here. libva-utils provides `vainfo` for
             # debugging VAAPI inside the pod. See the GPU wiring in
             # seattle-infra's deployment-grout.yaml.
@@ -89,9 +89,17 @@
               # libva at it (NixOS normally does this via hardware.graphics,
               # absent in a plain image). Referencing the driver store path here
               # also pulls it into the image closure. Mirrors Pseudovision.
-              # (NVENC needs none of this — its driver comes from the nvidia
-              # runtimeClass.) For pre-Broadwell GPUs use intel-vaapi-driver +
+              # For pre-Broadwell GPUs use intel-vaapi-driver +
               # LIBVA_DRIVER_NAME=i965.
+              # NVENC (NVIDIA). The device plugin's CDI spec mounts the driver
+              # libraries (libcuda.so.1, libnvidia-encode.so.1) at /usr/lib64
+              # and registers them with an ldconfig hook. Nix's glibc ignores
+              # /etc/ld.so.cache and never searches /usr/lib64, and ffmpeg's
+              # own RUNPATH points at /run/opengl-driver/lib, which a container
+              # doesn't have — so without this ffmpeg can't load libcuda and
+              # `-init_hw_device cuda` fails. Harmless on non-GPU nodes, where
+              # the directory doesn't exist.
+              LD_LIBRARY_PATH = "/usr/lib64";
               LIBVA_DRIVER_NAME = "iHD";
               LIBVA_DRIVERS_PATH = "${pkgs.intel-media-driver}/lib/dri";
             };
