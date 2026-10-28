@@ -386,9 +386,22 @@ Examples:
                                      (not (:no-filename-tag opts)) (conj filename-tag))))
           hash (file-hash cache file)
           verbose? (:verbose opts)
-          existing (by-hash server hash verbose?)]
+          existing (by-hash server hash verbose?)
+          ;; by-hash deliberately includes superseded rows (so intake can
+          ;; revive them) — but every id-addressed route (tag-add, get-one)
+          ;; filters them out. So a superseded hit must NOT take the retag
+          ;; path; treat it like "not stored" and upload, which revives the
+          ;; row via the dedup path.
+          superseded? (and (= 200 (:status existing))
+                           (:superseded-at (:json existing)))]
+      (when superseded?
+        (when verbose?
+          (binding [*out* *err*]
+            (println (str file ": by-hash hit is superseded (at "
+                          (:superseded-at (:json existing))
+                          "); treating as not stored — upload will revive it")))))
       (cond
-        (= 200 (:status existing))
+        (and (= 200 (:status existing)) (not superseded?))
         (let [id (:id (:json existing))]
           (if (:dry-run opts)
             {:file file :action :would-retag :id id :status 200 :tags all-tags :hash hash}
@@ -419,7 +432,7 @@ Examples:
                 {:file file :action :unchanged :id id :status 200
                  :tags (vec current) :hash hash}))))
 
-        (= 404 (:status existing))
+        (or (= 404 (:status existing)) superseded?)
         (if (:dry-run opts)
           {:file file :action :would-upload :status 404 :tags all-tags :hash hash}
           (let [parts (cond-> {:kind (:kind opts)
