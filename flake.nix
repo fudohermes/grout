@@ -66,6 +66,9 @@
           in helpers.deployContainers {
             name = "grout";
             repo = "registry.kube.sea.fudo.link";
+            # The registry is LAN-only and unauthenticated; without this the helper
+            # refuses to push unless skopeo has a stored login for it.
+            requireAuth = false;
             tags = [ "latest" version.versionTag ];
             # Keep ffmpeg/ffprobe on PATH for the intake/normalize pipeline.
             # nixpkgs' ffmpeg is built with --enable-nvenc and --enable-vaapi,
@@ -113,6 +116,9 @@
           in helpers.deployContainers {
             name = "grout-migratus";
             repo = "registry.kube.sea.fudo.link";
+            # The registry is LAN-only and unauthenticated; without this the helper
+            # refuses to push unless skopeo has a stored login for it.
+            requireAuth = false;
             tags = [ "latest" version.versionTag ];
             env = {
               GIT_COMMIT = version.gitCommit;
