@@ -32,7 +32,12 @@
                    :sample-rate 48000
                    :channels 2
                    :audio-bitrate "192k"
-                   :accel #or [#env GROUT_FFMPEG_ACCEL "auto"]}}
+                   :accel #or [#env GROUT_FFMPEG_ACCEL "auto"]
+                   ;; Most intakes that re-encode video at once; extra uploads
+                   ;; queue. Pure stream copies (remux, audio-only fixes)
+                   ;; don't count. Keeps a bulk import from swamping the GPU
+                   ;; PV also uses for live playout.
+                   :max-concurrent-transcodes #or [#env GROUT_MAX_TRANSCODES "2"]}}
 
  ;; Tunabrain: typed, purposeful endpoints (see
  ;; /opt/data/home/docs/grout-tunabrain-enrichment-requirements.md).

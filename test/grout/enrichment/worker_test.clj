@@ -14,14 +14,16 @@
 
 (deftest run-once-processes-pending
   (let [processed (atom [])]
-    (with-redefs [store/unenriched  (fn [_ _] [{:id 1} {:id 2}])
+    (with-redefs [store/mark-enrich-attempted! (fn [_ _] nil)
+                  store/unenriched  (fn [_ _] [{:id 1} {:id 2}])
                   enrich/enrich-one! (fn [_ _ _ id] (swap! processed conj id))]
       (is (= 2 (worker/run-once! nil fake-orchestrator 10)))
       (is (= [1 2] @processed)))))
 
 (deftest run-once-passes-dim-config-to-enrich
   (let [captured (atom nil)]
-    (with-redefs [store/unenriched  (fn [_ _] [{:id 1}])
+    (with-redefs [store/mark-enrich-attempted! (fn [_ _] nil)
+                  store/unenriched  (fn [_ _] [{:id 1}])
                   enrich/enrich-one! (fn [_ _ dim-config id]
                                        (reset! captured [dim-config id])
                                        nil)]
@@ -40,7 +42,8 @@
         orchestrator   {:tunabrain fake-client
                         :dim-config {:audience {:description "A" :values ["kids"]}}}
         captured-client (atom nil)]
-    (with-redefs [store/unenriched  (fn [_ _] [{:id 1}])
+    (with-redefs [store/mark-enrich-attempted! (fn [_ _] nil)
+                  store/unenriched  (fn [_ _] [{:id 1}])
                   enrich/enrich-one! (fn [_ client _dim-config _id]
                                        (reset! captured-client client)
                                        nil)]
@@ -50,7 +53,8 @@
 
 (deftest run-once-continues-past-errors
   (let [processed (atom [])]
-    (with-redefs [store/unenriched  (fn [_ _] [{:id 1} {:id 2}])
+    (with-redefs [store/mark-enrich-attempted! (fn [_ _] nil)
+                  store/unenriched  (fn [_ _] [{:id 1} {:id 2}])
                   enrich/enrich-one! (fn [_ _ _ id]
                                        (if (= id 1)
                                          (throw (RuntimeException. "x"))
@@ -60,3 +64,13 @@
 
 (deftest disabled-worker-is-noop
   (is (nil? (:executor (worker/start! {:enabled false})))))
+
+(deftest run-once-marks-each-row-attempted-before-enriching
+  ;; Rows that Tunabrain can't enrich stay enriched=false; the attempt stamp
+  ;; is what rotates them to the back of the queue so they can't starve it.
+  (let [events (atom [])]
+    (with-redefs [store/unenriched  (fn [_ _] [{:id 1} {:id 2}])
+                  store/mark-enrich-attempted! (fn [_ id] (swap! events conj [:mark id]))
+                  enrich/enrich-one! (fn [_ _ _ id] (swap! events conj [:enrich id]) nil)]
+      (worker/run-once! nil fake-orchestrator 10))
+    (is (= [[:mark 1] [:enrich 1] [:mark 2] [:enrich 2]] @events))))

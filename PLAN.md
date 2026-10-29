@@ -1,6 +1,6 @@
 # Grout plan
 
-Last reviewed: 2026-10-13
+Last reviewed: 2026-10-29
 
 This is the one place for ongoing work on Grout: what's being worked on,
 what's next, known issues, and the decisions that still shape the code. Delete
@@ -44,3 +44,13 @@ in the [ecosystem plan](https://github.com/fudoniten/pseudovision/blob/master/PL
   endpoints, never a generic chat-completions API.
 - TS is the source of truth for the dimension vocabulary; Grout validates
   against it rather than keeping its own.
+- 2026-10-29: intake normalizes per stream (`probe/stream-plan`). A conforming
+  video or audio stream is copied, never re-encoded, so a file with only bad
+  audio skips the video encode. Silent files count as audio-conforming.
+- 2026-10-29: video encodes are capped (`GROUT_MAX_TRANSCODES`, default 2,
+  sized for the P2200 that PV also uses for live playout) and each ffmpeg run
+  is killed after 5× the media duration (30-minute floor).
+- 2026-10-29: the per-file enrichment sweep orders by `enrich_attempted_at`
+  (never-tried first), so rows Tunabrain can't enrich rotate to the back
+  instead of blocking the queue. Failing rows are retried forever, just less
+  often; add an attempt cap if that turns out noisy.

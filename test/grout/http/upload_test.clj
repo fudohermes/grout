@@ -19,6 +19,9 @@
         (is (= "clip.mp4" (:filename result)))
         (is (= "video/mp4" (:content-type result)))
         (is (= (count bytes) (:size result)))
+        (is (= "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+               (:sha256 result))
+            "hash of the spooled bytes matches sha256sum")
         (let [^File tempfile (:tempfile result)]
           (is (.exists tempfile))
           (is (= (.getAbsolutePath dir) (.getAbsolutePath (.getParentFile tempfile))))

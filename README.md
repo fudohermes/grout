@@ -23,7 +23,9 @@ contributors are in [AGENTS.md](AGENTS.md).
    enrichment needs something new, extend Tunabrain's API.
 4. **Normalize once, at intake.** Every item is ffprobed and, if needed,
    transcoded to PV's playout profile (`libx264 / yuv420p / aac 192k / 48 kHz
-   stereo`, `+faststart`) before it's queryable. No transcoding on read.
+   stereo`, `+faststart`) before it's queryable. Video and audio are judged
+   separately: a stream that already matches is stream-copied, so an h264 file
+   with off-profile audio only re-encodes its audio. No transcoding on read.
 5. **Flat and tag-based.** No seasons, episodes, watch state, or scrapers;
    don't reimplement Jellyfin. Groups (a creator, a series) are expressed as
    `parent-directory:<slug>` tags with a shared directory profile.
@@ -107,6 +109,7 @@ Environment variables (see `resources/config.edn` for the full set and defaults)
 | `TUNABRAIN_URL` | Tunabrain gateway endpoint |
 | `TUNARR_SCHEDULER_URL` | Source of the dimension catalog (blank disables dimension validation) |
 | `GROUT_FFMPEG_ACCEL` | Hardware acceleration for intake transcodes (default `auto`) |
+| `GROUT_MAX_TRANSCODES` | Most intakes re-encoding video at once; the rest queue (default `2`). Stream copies don't count |
 | `GROUT_HTTP_PORT` | HTTP port (default 8080) |
 | `GROUT_ENRICHMENT_ENABLED`, `GROUT_DIRECTORY_ENRICHMENT_ENABLED`, `GROUT_RETENTION_ENABLED` | Toggle background jobs |
 
