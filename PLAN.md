@@ -1,6 +1,6 @@
 # Grout plan
 
-Last reviewed: 2026-10-13
+Last reviewed: 2026-10-29
 
 This is the one place for ongoing work on Grout: what's being worked on,
 what's next, known issues, and the decisions that still shape the code. Delete
@@ -44,3 +44,6 @@ in the [ecosystem plan](https://github.com/fudoniten/pseudovision/blob/master/PL
   endpoints, never a generic chat-completions API.
 - TS is the source of truth for the dimension vocabulary; Grout validates
   against it rather than keeping its own.
+- 2026-10-29: intake normalizes per stream (`probe/stream-plan`). A conforming
+  video or audio stream is copied, never re-encoded, so a file with only bad
+  audio skips the video encode. Silent files count as audio-conforming.

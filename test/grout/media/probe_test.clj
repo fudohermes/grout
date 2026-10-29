@@ -50,3 +50,52 @@
         "no hardware flags on the software path")
     (is (= "+faststart" (nth args (inc (.indexOf ^java.util.List args "-movflags"))))
         "faststart preserved")))
+
+(def ^:private conforming-probe
+  {:vcodec "h264" :pix-fmt "yuv420p" :acodec "aac"
+   :sample-rate 48000 :channels 2})
+
+(deftest stream-plan-judges-streams-independently
+  (let [plan #(probe/stream-plan % probe/default-profile)]
+    (is (= {:video :copy :audio :copy} (plan conforming-probe)))
+    (is (= {:video :copy :audio :transcode} (plan (assoc conforming-probe :acodec "ac3"))))
+    (is (= {:video :copy :audio :transcode} (plan (assoc conforming-probe :channels 6))))
+    (is (= {:video :copy :audio :transcode} (plan (assoc conforming-probe :sample-rate 44100))))
+    (is (= {:video :transcode :audio :copy} (plan (assoc conforming-probe :vcodec "hevc"))))
+    (is (= {:video :transcode :audio :copy} (plan (assoc conforming-probe :pix-fmt "yuv420p10le"))))
+    (is (= {:video :transcode :audio :transcode}
+           (plan (assoc conforming-probe :vcodec "mpeg4" :acodec "mp3"))))
+    (is (= {:video :copy :audio :copy}
+           (plan (dissoc conforming-probe :acodec :sample-rate :channels)))
+        "a silent file has no audio to encode")))
+
+(defn- args-after-input [args]
+  (->> args (drop-while #(not= % "in.mkv")) rest vec))
+
+(deftest audio-only-fix-copies-video
+  ;; The common off-profile case: video already matches, audio doesn't. The
+  ;; video must be stream-copied with no GPU/device setup at all, and only
+  ;; audio re-encoded. accel is :auto here to prove no backend is resolved.
+  (let [normalize-args #'probe/normalize-args
+        args (normalize-args "in.mkv" "out.mp4" probe/default-profile
+                             {:video :copy :audio :transcode})]
+    (is (= ["-c:v" "copy" "-c:a" "aac" "-b:a" "192k" "-ar" "48000" "-ac" "2"
+            "-movflags" "+faststart" "out.mp4"]
+           (args-after-input args)))
+    (is (not-any? #{"-hwaccel" "-init_hw_device" "-vf" "-pix_fmt"} args))))
+
+(deftest video-only-fix-copies-audio
+  (let [normalize-args #'probe/normalize-args
+        args (normalize-args "in.mkv" "out.mp4"
+                             (assoc probe/default-profile :accel :none)
+                             {:video :transcode :audio :copy})]
+    (is (= ["-c:v" "libx264" "-pix_fmt" "yuv420p" "-c:a" "copy"
+            "-movflags" "+faststart" "out.mp4"]
+           (args-after-input args)))))
+
+(deftest conforming-file-is-remuxed
+  (let [normalize-args #'probe/normalize-args
+        args (normalize-args "in.mkv" "out.mp4" probe/default-profile
+                             {:video :copy :audio :copy})]
+    (is (= ["-c" "copy" "-movflags" "+faststart" "out.mp4"]
+           (args-after-input args)))))

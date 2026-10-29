@@ -7,8 +7,8 @@
    `pseudovision.ffmpeg.profile`: it borrows that service's proven
    host-probe + graceful-fallback model but drops everything HLS-specific
    (GOP tuning, segment timing, rate-control presets). The intake pipeline
-   already stream-copies conforming files (see `probe/remux-args`), so this
-   only shapes the genuinely off-profile transcode.
+   already stream-copies conforming streams (see `probe/stream-plan`), so this
+   only shapes a genuinely off-profile video encode.
 
    Three backends: software (`:none`), NVIDIA NVENC (`:nvenc`), and VAAPI
    (`:vaapi`, Intel/AMD). Detection is a cheap filesystem probe of the render

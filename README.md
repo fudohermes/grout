@@ -23,7 +23,9 @@ contributors are in [AGENTS.md](AGENTS.md).
    enrichment needs something new, extend Tunabrain's API.
 4. **Normalize once, at intake.** Every item is ffprobed and, if needed,
    transcoded to PV's playout profile (`libx264 / yuv420p / aac 192k / 48 kHz
-   stereo`, `+faststart`) before it's queryable. No transcoding on read.
+   stereo`, `+faststart`) before it's queryable. Video and audio are judged
+   separately: a stream that already matches is stream-copied, so an h264 file
+   with off-profile audio only re-encodes its audio. No transcoding on read.
 5. **Flat and tag-based.** No seasons, episodes, watch state, or scrapers;
    don't reimplement Jellyfin. Groups (a creator, a series) are expressed as
    `parent-directory:<slug>` tags with a shared directory profile.
