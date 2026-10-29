@@ -178,7 +178,9 @@
       (is (= ["fun" "kids"] (:tags @captured)))
       (is (= "britannia" (:channel @captured)))
       (is (= "Bump" (:name @captured)))
-      (is (some? (:path @captured))))))
+      (is (some? (:path @captured)))
+      (is (= 64 (count (:content-hash @captured)))
+          "the hash computed while spooling is handed to intake"))))
 
 (deftest intake-no-file-is-400
   (let [resp (call (handler) (multipart-req "/grout/media" [["kind" "bumper"]]))]

@@ -88,6 +88,7 @@
           (let [req (cond-> {:path (.getAbsolutePath ^java.io.File tempfile)
                              :kind kind
                              :tags (vec (or (parse-tags tags) []))}
+                      (:sha256 file)                 (assoc :content-hash (:sha256 file))
                       (not (str/blank? channel))     (assoc :channel channel)
                       (not (str/blank? source))      (assoc :source source)
                       (not (str/blank? source-url))  (assoc :source-url source-url)

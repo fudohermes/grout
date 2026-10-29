@@ -60,18 +60,20 @@
 
 (defn intake!
   "Run the intake pipeline for `req` (a map with :path :kind and optional
-   :channel :tags :source :source-url :name :description). Returns
+   :channel :tags :source :source-url :name :description, plus :content-hash
+   when the caller already hashed the bytes, e.g. while spooling an upload).
+   Returns
    {:row created-or-updated-row :deduplicated bool}."
   [{:keys [ds media-dir profile]}
    {:keys [path kind channel tags source source-url name description] :as req}]
-  (let [content-hash (hash/sha256-file path)]
+  (let [content-hash (or (:content-hash req) (hash/sha256-file path))]
     (if-let [existing (store/find-by-hash ds content-hash)]
       {:row (dedup! ds existing req) :deduplicated true}
       (try
         (let [out (hash/content-path (or media-dir (.getParent (java.io.File. ^String path)))
                                      content-hash)
               {final-path :path pr :probe normalized :normalized}
-              (probe/normalize-to! path out (or profile probe/default-profile))]
+              (probe/normalize-to! path out (merge probe/default-profile profile))]
           (when-not (:duration-ms pr)
             (throw (ex-info "Could not determine media duration" {:path final-path})))
           (log/info "Intake stored new item"
