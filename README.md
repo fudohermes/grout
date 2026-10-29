@@ -109,6 +109,7 @@ Environment variables (see `resources/config.edn` for the full set and defaults)
 | `TUNABRAIN_URL` | Tunabrain gateway endpoint |
 | `TUNARR_SCHEDULER_URL` | Source of the dimension catalog (blank disables dimension validation) |
 | `GROUT_FFMPEG_ACCEL` | Hardware acceleration for intake transcodes (default `auto`) |
+| `GROUT_MAX_TRANSCODES` | Most intakes re-encoding video at once; the rest queue (default `2`). Stream copies don't count |
 | `GROUT_HTTP_PORT` | HTTP port (default 8080) |
 | `GROUT_ENRICHMENT_ENABLED`, `GROUT_DIRECTORY_ENRICHMENT_ENABLED`, `GROUT_RETENTION_ENABLED` | Toggle background jobs |
 

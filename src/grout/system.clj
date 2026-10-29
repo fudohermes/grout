@@ -23,6 +23,15 @@
     (string? port) (Integer/parseInt port)
     :else 8080))
 
+(defn- parse-pos-int
+  "A positive int from config (which may hand us an env-var string), else
+   `default`."
+  [v default]
+  (let [n (cond (int? v) v
+                (and (string? v) (re-matches #"\d+" (str/trim v))) (Integer/parseInt (str/trim v))
+                :else nil)]
+    (if (and n (pos? n)) n default)))
+
 (defn- parse-bool
   "Coerce a config/env value to boolean. Env vars arrive as strings, so a bare
    \"false\" must not read as truthy."
@@ -179,10 +188,17 @@
         ;; `detect-accels` logs the render-node/NVIDIA-device detail; this
         ;; pairs it with the profile's requested backend so the two together
         ;; show, at a glance, whether GPU transcode will actually engage.
-        available-accels (accel/available-accels)]
+        available-accels (accel/available-accels)
+        max-transcodes   (parse-pos-int (:max-concurrent-transcodes profile) 2)
+        ;; Shared by every intake: bounds concurrent video encodes (see
+        ;; probe/normalize-to!). Stream copies don't take a permit.
+        profile          (assoc profile
+                                :max-concurrent-transcodes max-transcodes
+                                :transcode-permits (java.util.concurrent.Semaphore. max-transcodes true))]
     (log/info "FFmpeg transcode acceleration ready"
               {:requested-accel (get profile :accel :auto)
-               :available-accels available-accels})
+               :available-accels available-accels
+               :max-concurrent-transcodes max-transcodes})
     (log/info "Media store ready" {:media-dir media-dir :staging-dir staging-dir :dim-config-count (count dim-config)})
     {:ds db :media-dir media-dir :staging-dir staging-dir :profile profile
      :tunabrain tunabrain

@@ -10,7 +10,9 @@
             [clojure.java.shell :as sh]
             [clojure.string :as str]
             [grout.media.accel :as accel]
-            [taoensso.timbre :as log]))
+            [taoensso.timbre :as log])
+  (:import [java.lang ProcessBuilder$Redirect]
+           [java.util.concurrent TimeUnit]))
 
 (def ^:private ffprobe-bin (or (System/getenv "FFPROBE_PATH") "ffprobe"))
 (def ^:private ffmpeg-bin (or (System/getenv "FFMPEG_PATH") "ffmpeg"))
@@ -113,7 +115,7 @@
 (defn- normalize-args [in out profile {:keys [video audio] :as plan}]
   (if (= [:copy :copy] [video audio])
     ;; Conforming files only need the moov atom moved to the front.
-    [ffmpeg-bin "-y" "-i" in "-c" "copy" "-movflags" "+faststart" out]
+    [ffmpeg-bin "-y" "-hide_banner" "-nostats" "-i" in "-c" "copy" "-movflags" "+faststart" out]
     (let [requested (:accel profile)
           accel     (when (= video :transcode) (accel/resolve-accel requested))
           vf        (when accel (accel/video-filter accel))
@@ -129,7 +131,7 @@
                  :requested-accel (or requested :auto)
                  :accel accel
                  :encoder (second venc)})
-      (-> [ffmpeg-bin "-y"]
+      (-> [ffmpeg-bin "-y" "-hide_banner" "-nostats"]
           (cond-> accel (into (accel/input-args accel)))
           (into ["-i" in])
           (cond-> vf (into ["-vf" vf]))
@@ -138,9 +140,56 @@
           (into (if (= audio :transcode) (audio-encode-args profile) ["-c:a" "copy"]))
           (into ["-movflags" "+faststart" out])))))
 
-;; Full transcode of both streams; kept as a named entry point for tests.
-(defn- transcode-args [in out profile]
-  (normalize-args in out profile {:video :transcode :audio :transcode}))
+(def ^:private min-ffmpeg-timeout-secs (* 30 60))
+
+(defn ffmpeg-timeout-secs
+  "How long a normalize may run before it is killed: five times the media's
+   duration (a slow software encode of long-form content), never under 30
+   minutes. Without a bound, a wedged ffmpeg (bad input, a stuck GPU) holds
+   the upload request and its Jetty thread forever."
+  [duration-ms]
+  (max min-ffmpeg-timeout-secs
+       (if duration-ms (long (/ (* 5 duration-ms) 1000)) 0)))
+
+(defn- run-ffmpeg!
+  "Run `args` with a timeout. Returns {:exit n :err stderr}, with exit -1 when
+   the process was killed for running too long. stderr goes to a temp file
+   rather than a pipe so a chatty encode can't fill the pipe and stall."
+  [args timeout-secs]
+  (let [err-f (java.io.File/createTempFile "grout-ffmpeg-" ".log")]
+    (try
+      (let [proc (-> (ProcessBuilder. ^java.util.List (vec args))
+                     (.redirectOutput ProcessBuilder$Redirect/DISCARD)
+                     (.redirectError err-f)
+                     (.start))]
+        (if (.waitFor proc timeout-secs TimeUnit/SECONDS)
+          {:exit (.exitValue proc) :err (slurp err-f)}
+          (do (.destroyForcibly proc)
+              (.waitFor proc 10 TimeUnit/SECONDS)
+              {:exit -1
+               :err (str "ffmpeg killed after " timeout-secs "s\n" (slurp err-f))})))
+      (finally
+        (io/delete-file err-f true)))))
+
+(defn- run-normalize!
+  "Run the normalize command for `plan`. A plan that re-encodes video first
+   takes a permit from the profile's `:transcode-permits` semaphore (set up in
+   grout.system), so only a bounded number of video encodes share the
+   GPU/CPU at once; copies and audio-only fixes are cheap and skip the queue.
+   The ffmpeg timeout starts once the permit is held."
+  [args profile plan duration-ms]
+  (let [^java.util.concurrent.Semaphore permits (:transcode-permits profile)
+        gated? (and permits (= :transcode (:video plan)))]
+    (when gated?
+      (when (zero? (.availablePermits permits))
+        (log/info "Waiting for a transcode slot"
+                  {:max (:max-concurrent-transcodes profile)
+                   :queued (.getQueueLength permits)}))
+      (.acquire permits))
+    (try
+      (run-ffmpeg! args (ffmpeg-timeout-secs duration-ms))
+      (finally
+        (when gated? (.release permits))))))
 
 (defn normalize-to!
   "Normalize `in` into `out` (creating parent dirs) WITHOUT mutating `in`:
@@ -157,7 +206,7 @@
          args        (normalize-args in tmp profile plan)
          _           (log/info "Normalizing media"
                                {:in in :out out :conforming conforming? :plan plan})
-         {:keys [exit err]} (apply sh/sh args)]
+         {:keys [exit err]} (run-normalize! args profile plan (:duration-ms pr))]
      (when-not (zero? exit)
        (io/delete-file tmp true)
        (throw (ex-info "ffmpeg normalize failed"
@@ -183,7 +232,7 @@
          args        (normalize-args path tmp profile plan)
          _           (log/info "Normalizing media"
                                {:path path :conforming conforming? :plan plan :out out})
-         {:keys [exit err]} (apply sh/sh args)]
+         {:keys [exit err]} (run-normalize! args profile plan (:duration-ms pr))]
      (when-not (zero? exit)
        (io/delete-file tmp true)
        (throw (ex-info "ffmpeg normalize failed"

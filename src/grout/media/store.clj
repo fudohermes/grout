@@ -223,7 +223,12 @@
   directory-enrichment pipeline (a shared profile fanned out group-wide), NOT by
   the per-file Tunabrain sweep. Without this exclusion a bulk import of 200k
   directory-tagged files would be swept per-file — exactly the cost this feature
-  exists to avoid. Plain SQL (rather than honeysql) so the `unnest`/`LIKE`
+  exists to avoid.
+
+  Never-attempted rows come first, then the least recently attempted (see
+  `mark-enrich-attempted!`). Without an order, rows Tunabrain can't enrich stay
+  `enriched=false` and tend to be returned again every sweep, so a full batch
+  of them starves everything queued behind. Plain SQL (rather than honeysql) so the `unnest`/`LIKE`
   prefix-exclusion reads unambiguously."
   [ds limit]
   (jdbc/execute! ds
@@ -231,9 +236,17 @@
                        "WHERE enriched = false AND superseded_at IS NULL "
                        "AND NOT EXISTS ("
                        "  SELECT 1 FROM unnest(tags) AS t WHERE t LIKE 'parent-directory:%'"
-                       ") LIMIT ?")
+                       ") ORDER BY enrich_attempted_at ASC NULLS FIRST, created_at ASC"
+                       " LIMIT ?")
                   limit]
                  {:builder-fn rs/as-unqualified-lower-maps}))
+
+(defn mark-enrich-attempted!
+  "Stamp `enrich_attempted_at` on row `id` so the next sweep moves it to the
+  back of the queue (see `unenriched`). Called before each attempt, so a
+  crash mid-call still rotates the row."
+  [ds id]
+  (jdbc/execute-one! ds ["UPDATE grout_media SET enrich_attempted_at = now() WHERE id = ?" id]))
 
 (defn set-enriched!
   "Mark a row as enriched and persist the AI-derived metadata + the

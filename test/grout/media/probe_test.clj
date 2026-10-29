@@ -40,9 +40,10 @@
   ;; Guards that a software (`:accel :none`) transcode still emits the original
   ;; command: bare libx264 + -pix_fmt, no hardware device/hwaccel/-vf flags.
   ;; This is the fallback path on CPU-only hosts, so it must not regress.
-  (let [transcode-args #'probe/transcode-args
-        args (transcode-args "in.mkv" "out.mp4"
-                             (assoc probe/default-profile :accel :none))]
+  (let [normalize-args #'probe/normalize-args
+        args (normalize-args "in.mkv" "out.mp4"
+                             (assoc probe/default-profile :accel :none)
+                             {:video :transcode :audio :transcode})]
     (is (= ["-c:v" "libx264" "-pix_fmt" "yuv420p"]
            (->> args (drop-while #(not= % "in.mkv")) rest (take 4)))
         "video encode is unchanged libx264 + pixfmt")
@@ -99,3 +100,21 @@
                              {:video :copy :audio :copy})]
     (is (= ["-c" "copy" "-movflags" "+faststart" "out.mp4"]
            (args-after-input args)))))
+
+(deftest ffmpeg-timeout-scales-with-duration
+  (is (= (* 30 60) (probe/ffmpeg-timeout-secs nil)))
+  (is (= (* 30 60) (probe/ffmpeg-timeout-secs 60000)) "short clips get the floor")
+  (is (= (* 5 3600) (probe/ffmpeg-timeout-secs (* 3600 1000))) "an hour of media gets 5h"))
+
+(deftest only-video-encodes-take-a-transcode-permit
+  (let [run-normalize! #'probe/run-normalize!
+        permits (java.util.concurrent.Semaphore. 1)
+        profile (assoc probe/default-profile :transcode-permits permits)
+        seen    (atom [])]
+    (with-redefs-fn {#'probe/run-ffmpeg!
+                     (fn [_ _] (swap! seen conj (.availablePermits permits)) {:exit 0 :err ""})}
+      (fn []
+        (run-normalize! [] profile {:video :transcode :audio :copy} 1000)
+        (run-normalize! [] profile {:video :copy :audio :transcode} 1000)))
+    (is (= [0 1] @seen) "the permit is held during a video encode, not during a copy")
+    (is (= 1 (.availablePermits permits)) "the permit is released afterwards")))
