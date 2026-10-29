@@ -16,7 +16,7 @@
 (def ^:private ffmpeg-bin (or (System/getenv "FFMPEG_PATH") "ffmpeg"))
 
 (def default-profile
-  "PV playout profile — mirrors Tunarr Scheduler's bumper profile.
+  "PV playout profile - mirrors Tunarr Scheduler's bumper profile.
 
    `:accel` selects the transcode backend (see `grout.media.accel`): `:auto`
    uses hardware acceleration when the host exposes it and falls back to
@@ -57,15 +57,43 @@
        :sample-rate (some-> (:sample_rate a) parse-long)
        :channels    (:channels a)})))
 
-(defn conforms?
-  "True when a probe result already matches the playout profile's codecs,
-   pixel format, sample rate and channel count."
+(defn conforms-video?
+  "True when the video stream already matches the profile's video codec and
+  pixel format."
   [probe-result profile]
   (and (= (:vcodec probe-result) (:vcodec profile))
-       (= (:pix-fmt probe-result) (:pix-fmt profile))
-       (= (:acodec probe-result) (:acodec profile))
+       (= (:pix-fmt probe-result) (:pix-fmt profile))))
+
+(defn conforms-audio?
+  "True when the audio stream already matches the profile's audio codec,
+  sample rate and channel count."
+  [probe-result profile]
+  (and (= (:acodec probe-result) (:acodec profile))
        (= (:sample-rate probe-result) (:sample-rate profile))
        (= (:channels probe-result) (:channels profile))))
+
+(defn conforms?
+  "True when a probe result already matches the playout profile's codecs,
+  pixel format, sample rate and channel count."
+  [probe-result profile]
+  (and (conforms-video? probe-result profile)
+       (conforms-audio? probe-result profile)))
+
+(defn normalize-mode
+  "Which ffmpeg path `probe-result` needs against `profile`:
+
+     :remux      fully conforming - stream-copy everything, just add faststart
+     :audio-fix  video conforms but audio does not - copy the video stream and
+                 re-encode audio only. Common for web rips (h264/yuv420p video
+                 is already playout-ready but audio is 44.1kHz); re-encoding the
+                 video for an audio-only mismatch is minutes of GPU/CPU time
+                 for zero visual benefit, vs seconds for the audio.
+     :transcode  video does not conform - full transcode via `transcode-args`"
+  [probe-result profile]
+  (cond
+    (conforms? probe-result profile) :remux
+    (conforms-video? probe-result profile) :audio-fix
+    :else :transcode))
 
 (defn- with-ext [path ext]
   (let [dot (.lastIndexOf ^String path ".")]
@@ -102,25 +130,46 @@
                "-movflags" "+faststart"
                out]))))
 
+;; Video-conforming / audio-offending files keep their video bit-for-bit and
+;; re-encode audio only. Seconds of work instead of a full re-encode, and no
+;; generational loss on the video stream.
+(defn- audio-fix-args [in out profile]
+  [ffmpeg-bin "-y" "-i" in
+   "-map" "0:v:0" "-map" "0:a:0?"
+   "-c:v" "copy"
+   "-c:a" "aac" "-b:a" (:audio-bitrate profile)
+   "-ar" (str (:sample-rate profile))
+   "-ac" (str (:channels profile))
+   "-movflags" "+faststart"
+   out])
+
 ;; Conforming files only need the moov atom moved to the front for faststart;
 ;; a stream copy is cheap and lossless.
 (defn- remux-args [in out]
   [ffmpeg-bin "-y" "-i" in "-c" "copy" "-movflags" "+faststart" out])
 
+(defn- mode->args [mode in out profile]
+  (case mode
+    :remux (remux-args in out)
+    :audio-fix (audio-fix-args in out profile)
+    :transcode (transcode-args in out profile)))
+
 (defn normalize-to!
   "Normalize `in` into `out` (creating parent dirs) WITHOUT mutating `in`:
-   transcodes off-profile media or stream-copies conforming media, always with
+   full transcode for off-profile video, video-copy audio-only re-encode when
+   only audio is off-profile, stream-copy for conforming media - always with
    faststart. Returns {:path out :probe fresh-probe :normalized bool}. Used by
    content-addressed intake, which must leave the caller's source untouched."
   ([in out profile] (normalize-to! in out profile nil))
   ([in out profile probe-result]
    (io/make-parents out)
    (let [pr          (or probe-result (probe in))
-         conforming? (conforms? pr profile)
+         mode        (normalize-mode pr profile)
+         conforming? (= mode :remux)
          tmp         (str out ".tmp-" (System/currentTimeMillis) ".mp4")
-         args        (if conforming? (remux-args in tmp) (transcode-args in tmp profile))
+         args        (mode->args mode in tmp profile)
          _           (log/info "Normalizing media"
-                               {:in in :out out :conforming conforming?})
+                               {:in in :out out :conforming conforming? :mode mode})
          {:keys [exit err]} (apply sh/sh args)]
      (when-not (zero? exit)
        (io/delete-file tmp true)
@@ -140,12 +189,13 @@
   ([path profile] (normalize! path profile nil))
   ([path profile probe-result]
    (let [pr          (or probe-result (probe path))
-         conforming? (conforms? pr profile)
+         mode        (normalize-mode pr profile)
+         conforming? (= mode :remux)
          out         (with-ext path ".mp4")
          tmp         (str out ".tmp-" (System/currentTimeMillis) ".mp4")
-         args        (if conforming? (remux-args path tmp) (transcode-args path tmp profile))
+         args        (mode->args mode path tmp profile)
          _           (log/info "Normalizing media"
-                               {:path path :conforming conforming? :out out})
+                               {:path path :conforming conforming? :mode mode :out out})
          {:keys [exit err]} (apply sh/sh args)]
      (when-not (zero? exit)
        (io/delete-file tmp true)

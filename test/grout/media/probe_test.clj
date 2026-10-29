@@ -1,6 +1,6 @@
 (ns grout.media.probe-test
   "Unit tests for ffprobe JSON parsing and profile conformance. ffprobe/ffmpeg
-   are not invoked — clojure.java.shell/sh is stubbed."
+   are not invoked - clojure.java.shell/sh is stubbed."
   (:require [clojure.test :refer [deftest is]]
             [clojure.java.shell :as sh]
             [grout.media.probe :as probe]))
@@ -35,6 +35,29 @@
     (is (not (probe/conforms? (assoc good :acodec "mp3") probe/default-profile)))
     (is (not (probe/conforms? (assoc good :sample-rate 44100) probe/default-profile)))
     (is (not (probe/conforms? (assoc good :pix-fmt "yuv444p") probe/default-profile)))))
+
+(deftest normalize-mode-picks-cheapest-correct-path
+  (let [good {:vcodec "h264" :pix-fmt "yuv420p" :acodec "aac"
+              :sample-rate 48000 :channels 2}]
+    (is (= :remux (probe/normalize-mode good probe/default-profile)))
+    ;; web-rip case: video is playout-ready, audio is 44.1kHz - the expensive
+    ;; mistake this test pins is ever sending this back through a full transcode
+    (is (= :audio-fix (probe/normalize-mode
+                       (assoc good :sample-rate 44100) probe/default-profile)))
+    (is (= :audio-fix (probe/normalize-mode
+                       (assoc good :acodec "mp3") probe/default-profile)))
+    (is (= :transcode (probe/normalize-mode
+                       (assoc good :pix-fmt "yuv444p") probe/default-profile)))
+    (is (= :transcode (probe/normalize-mode
+                       (assoc good :vcodec "hevc") probe/default-profile)))))
+
+(deftest audio-fix-args-copy-video-reencode-audio
+  (let [args (#'probe/audio-fix-args "in.mp4" "out.mp4" probe/default-profile)]
+    (is (some #{"copy"} args) "video stream is copied, not re-encoded")
+    (is (some #{"aac"} args) "audio is re-encoded to aac")
+    (is (some #{"48000"} args) "audio resampled to the profile rate")
+    (is (= "+faststart" (nth args (inc (.indexOf ^java.util.List args "-movflags"))))
+        "faststart preserved")))
 
 (deftest software-transcode-args-unchanged
   ;; Guards that a software (`:accel :none`) transcode still emits the original
